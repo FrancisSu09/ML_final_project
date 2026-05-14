@@ -1,0 +1,159 @@
+{
+  "target": "High",
+  "rows": 3000,
+  "test_rows": 600,
+  "paper_method": "ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN",
+  "decomposition_mode": "iceemdan_pso_vmd",
+  "model_variant": "proposed",
+  "time_scale": 1,
+  "train_split_date": null,
+  "train_split_index": null,
+  "metrics": {
+    "MAPE": 0.5079202658290768,
+    "MAE": 21.03040539647822,
+    "RMSE": 25.912664648969827
+  },
+  "naive_previous_value_metrics": {
+    "MAPE": 0.7102122237011622,
+    "MAE": 29.258649999999992,
+    "RMSE": 39.55109971711701
+  },
+  "mdm_vs_naive": {
+    "mape": {
+      "statistic": -7.167861508870682,
+      "p_value": 2.2506227310591585e-12,
+      "loss": "mape",
+      "horizon": 1
+    },
+    "mae": {
+      "statistic": -7.146051585818354,
+      "p_value": 2.6057017586922044e-12,
+      "loss": "mae",
+      "horizon": 1
+    },
+    "rmse": {
+      "statistic": -7.590710421623922,
+      "p_value": 1.2251399411242702e-13,
+      "loss": "rmse",
+      "horizon": 1
+    }
+  },
+  "vmd": {
+    "k": 3,
+    "alpha": 2455.0,
+    "pso_fitness": 0.9556395329135102,
+    "imf1_reconstruction_error": 4.1691318360835856e-17
+  },
+  "components": [
+    {
+      "name": "VIMF1",
+      "best_val_loss": 0.0013029409194254087,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 100,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 95
+    },
+    {
+      "name": "VIMF2",
+      "best_val_loss": 0.001420661137550368,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 200,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 183
+    },
+    {
+      "name": "VIMF3",
+      "best_val_loss": 0.01158870200949982,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 200,
+        "batch_size": 64,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 184
+    },
+    {
+      "name": "IMF2",
+      "best_val_loss": 0.002090817679764087,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 200,
+        "batch_size": 64,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 73
+    },
+    {
+      "name": "IMF3",
+      "best_val_loss": 0.000158785647765254,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 200,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 121
+    },
+    {
+      "name": "IMF4",
+      "best_val_loss": 0.0014579039679763002,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 200,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 84
+    },
+    {
+      "name": "IMF5",
+      "best_val_loss": 0.0005783979392225808,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 100,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 79
+    },
+    {
+      "name": "IMF6",
+      "best_val_loss": 0.012890968891640027,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 200,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 31
+    },
+    {
+      "name": "IMF7",
+      "best_val_loss": 3.3112922206615533e-05,
+      "params": {
+        "hidden_size": 128,
+        "epochs": 100,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 47
+    },
+    {
+      "name": "Res",
+      "best_val_loss": 2.8231996898341786e-08,
+      "params": {
+        "hidden_size": 32,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 46
+    }
+  ]
+}

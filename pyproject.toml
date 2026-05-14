@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sp500-iceemdan-bilstm-sam-tcn"
+version = "0.1.0"
+description = "S&P 500 high/low forecasting with ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.0",
+  "scipy>=1.11",
+  "torch>=2.2",
+  "yfinance>=0.2.40",
+  "matplotlib>=3.8",
+  "PyYAML>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
