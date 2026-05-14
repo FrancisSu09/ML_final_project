@@ -1,0 +1,166 @@
+# S&P 500 最高價/最低價預測
+
+這個專案依照論文 **Gong & Xing (2024), “Predicting the highest and lowest stock price indices: A combined BiLSTM-SAM-TCN deep learning model based on re-decomposition”** 的流程，實作 S&P 500 daily High / Low 預測。此版本以「可審核復刻」為目標：VMD 採標準 ADMM 流程、SAM 採論文 additive attention 公式，並預設使用論文 Table 4 的 S&P 500 VMD 參數。
+
+模型流程：
+
+1. 對原始序列做 ICEEMDAN 初分解，得到 `IMF1 ... IMFm` 與 `Res`。
+2. 將最高頻的 `IMF1` 用 PSO 搜尋 VMD 的最佳 `K` 與 `alpha`，再做 VMD 二次分解。
+3. 對每個 `VIMF`、其餘 `IMF`、`Res` 分別訓練 `BiLSTM-SAM-TCN`。
+4. 將所有子序列預測值線性加總，得到最終 High 或 Low 預測。
+5. 輸出 `MAPE`、`MAE`、`RMSE`，並附上與 naive previous-value baseline 的 MDM 檢定。
+
+## 安裝
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+## 資料
+
+預設設定使用論文資料源 Investing.com 匯出的 S&P 500 historical CSV，日期對齊論文的 S&P 500 區間：
+
+- 起日：`2011-05-02`
+- 迄日：`2023-03-31`
+- 目標欄位：`High`、`Low`
+
+請先到 Investing.com 的 S&P 500 Historical Data 頁面匯出 CSV，日期範圍選 `2011-05-02` 到 `2023-03-31`，並把檔案存成：
+
+```text
+data/raw/sp500_investing.csv
+```
+
+檢查資料是否符合論文樣本：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml check-data
+```
+
+CSV 至少要有日期、最高價、最低價欄位；常見的 `Date / High / Low`、`日期 / 高 / 低`、`日期 / 最高價 / 最低價` 欄名會自動辨識。預設 `strict_paper_sample: true`，日期過濾後必須剛好是 3000 筆。
+
+如果只是想快速測流程，可以另行把 `configs/sp500.yaml` 裡的 `data.csv_path` 清空，再使用 Yahoo Finance 便利下載：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml download
+```
+
+## 執行完整模型
+
+同時預測 High 和 Low：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both
+```
+
+目前 `configs/sp500.yaml` 預設使用較嚴格的 `decomposition.scope: walk_forward`：
+
+- 先切出 fit / validation / test。
+- 只用 fit 區間做 ICEEMDAN / VMD 分解。
+- validation 與 test 不會進入 fit decomposition。
+- Grid search 會對每組候選參數訓練所有 component model，並對 validation 每一天重新分解「截至前一天」的真實價格歷史，再以 validation RMSE 選最佳參數。
+- Test evaluation 使用選出的參數，對 test 每一天重新分解「截至前一天」的真實價格歷史，取最新 IMF/VIMF/Res window 預測下一天，再加總成價格預測。
+- Min-Max scaler 只用真正 fitting subset 估計 min/max，不含 validation/test target。
+
+若要復刻論文 Table 6 的 full-sample decomposition 流程，可改回：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --decomposition-scope full_sample
+```
+
+若要使用較快但容易長期誤差累積的 train-only recursive baseline，可使用：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --decomposition-scope train_only_recursive
+```
+
+只預測最高價：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target high
+```
+
+只預測最低價：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target low
+```
+
+跑論文的 weekly / monthly 時間尺度變體：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --time-scale 5
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --time-scale 20
+```
+
+跑論文的 S&P 500 極端市場測試切分：
+
+```bash
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --train-split-date 2020-01-01
+```
+
+跑消融模型：
+
+```bash
+# Ablation model 1: no decomposition
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --decomposition-mode none
+
+# Ablation model 2: ICEEMDAN only, no VMD re-decomposition
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --decomposition-mode iceemdan
+
+# Ablation variants for the neural network block
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --model-variant no_attention
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --model-variant no_tcn
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --model-variant no_bilstm
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --model-variant lstm_sam_tcn
+python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --model-variant bilstm_sam_cnn
+```
+
+快速檢查環境與流程：
+
+```bash
+python -m sp500_forecast.cli smoke
+```
+
+## 輸出
+
+預設輸出到 `outputs/sp500/`：
+
+- `predictions_high.csv` / `predictions_low.csv`：測試集日期、實際值、預測值、誤差。
+- `component_predictions_high.csv` / `component_predictions_low.csv`：每個子序列的實際與預測值。
+- `summary_high.json` / `summary_low.json`：MAPE、MAE、RMSE、VMD 最佳參數、每個子模型訓練參數。
+- `best_params_high.json` / `best_params_low.json`：grid search 選出的每個 IMF/VIMF/Res 最佳模型參數；下次若 `model.search_hyperparameters: false` 且 `model.use_cached_params: true`，會自動重用。
+- `decomposition_components_high.csv` / `decomposition_components_low.csv`：full-sample 模式下的 IMF/VIMF/Res 分解序列。
+- `decomposition_fit_components_high.csv` / `decomposition_fit_components_low.csv`：嚴格模式下只用 fit 區間得到的 IMF/VIMF/Res 分解序列。
+- `validation_predictions_high.csv` / `validation_predictions_low.csv`：嚴格模式下用於 grid search 選參的 validation 預測。
+- `fit_high.png` / `fit_low.png`：實際值與預測值擬合圖。
+- `decomposition_high.npz` / `decomposition_low.npz`：IMF、VIMF、Res 分解結果。
+
+## 重要參數
+
+主要參數集中在 `configs/sp500.yaml`：
+
+- `experiment.window_size: 3`：論文設定的時間視窗。
+- `experiment.train_ratio: 0.8`：前 80% 訓練、後 20% 測試。
+- `experiment.train_split_date`：指定日期切分訓練/測試；留空時使用 `train_ratio`。
+- `experiment.time_scale: 1`：`1` 是 daily；改成 `5` 可跑 weekly robustness，改成 `20` 可跑 monthly robustness。
+- `decomposition.mode: iceemdan_pso_vmd`：proposed model；可改 `iceemdan` 或 `none` 做消融。
+- `decomposition.scope: walk_forward`：較嚴格的 no-leakage 預測流程；若要對表復刻論文，可改成 `full_sample`，若要跑較快 baseline 可改成 `train_only_recursive`。
+- `decomposition.use_paper_vmd_params: true`：S&P 500 High/Low 使用論文 Table 4 的 `K=3`、`alpha=2455/2740`。若要重新跑 PSO，改成 `false` 或 CLI 加 `--search-vmd`。
+- `model.variant: proposed`：可改成 `no_attention`、`no_tcn`、`no_bilstm`、`lstm_sam_tcn`、`bilstm_sam_cnn`。
+- `model.dropout: 0.2`
+- `model.tcn_channels: 32`
+- `model.tcn_kernel_size: 2`
+- `model.tcn_dilations: [1, 2, 4, 8]`
+- `model.patience: 20`
+- `model.search_hyperparameters: false`
+- `model.use_cached_params: true`：不開 grid search 時，若有 `best_params_<target>.json` 就直接重用。
+- `model.save_best_params: true`：每次訓練後存出各 component 最佳參數。
+
+若要更貼近論文的子序列逐一試參數，可把 `model.search_hyperparameters` 改成 `true`，程式會在 `hidden_grid`、`epoch_grid`、`batch_grid` 裡搜尋。
+
+## 注意
+
+論文資料來自 Investing，本專案仍保留 Yahoo Finance 下載作為便利入口，但預設復刻設定會讀取 `data/raw/sp500_investing.csv`。若要對表復刻，請使用 Investing CSV 並先跑 `check-data`。不同資料源、隨機種子、硬體與深度學習框架仍可能造成小幅差異，但目前版本已把最容易造成方法偏離的 VMD、SAM、VMD 參數與資料檢查補上。

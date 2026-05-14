@@ -1,0 +1,6 @@
+[
+  "tests/test_config_data.py::test_config_relative_data_path_resolves_from_project_root",
+  "tests/test_config_data.py::test_empty_csv_error_mentions_path",
+  "tests/test_model.py::test_model_forward_shape_without_weight_norm_deprecation",
+  "tests/test_pipeline.py::test_walk_forward_alignment_folds_extra_components_into_residual"
+]

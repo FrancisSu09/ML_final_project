@@ -1,0 +1,139 @@
+{
+  "cache_schema": "walk_forward_v2",
+  "target": "High",
+  "decomposition_mode": "iceemdan_pso_vmd",
+  "decomposition_scope": "walk_forward",
+  "model_variant": "proposed",
+  "time_scale": 1,
+  "window_size": 3,
+  "vmd": {
+    "k": 3,
+    "alpha": 2455.0,
+    "pso_fitness": 0.9677189705718415
+  },
+  "parameter_selection": {
+    "source": "default_params_walk_forward_validation",
+    "metric": "RMSE",
+    "score": 51.67568638845369,
+    "validation_metrics": {
+      "MAPE": 1.1852373482333913,
+      "MAE": 35.72326725574387,
+      "RMSE": 51.67568638845369
+    },
+    "shared_params": {
+      "hidden_size": 64,
+      "epochs": 100,
+      "batch_size": 32,
+      "learning_rate": 0.001
+    },
+    "candidates_evaluated": 1
+  },
+  "split": {
+    "fit_end_index": 2161,
+    "validation_start_index": 2161,
+    "validation_end_index": 2400,
+    "train_split_index": 2400
+  },
+  "components": {
+    "VIMF1": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.0003083071925238771,
+      "epochs_run": 83
+    },
+    "VIMF2": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.0019230603240430356,
+      "epochs_run": 94
+    },
+    "VIMF3": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.009460761090523975,
+      "epochs_run": 40
+    },
+    "IMF2": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.0009517961687971513,
+      "epochs_run": 63
+    },
+    "IMF3": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.00019419821023908553,
+      "epochs_run": 42
+    },
+    "IMF4": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 4.358987263363223e-05,
+      "epochs_run": 100
+    },
+    "IMF5": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.0003264793682932958,
+      "epochs_run": 64
+    },
+    "IMF6": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 2.228073988505436e-05,
+      "epochs_run": 54
+    },
+    "IMF7": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 7.883613374741439e-06,
+      "epochs_run": 35
+    },
+    "Res": {
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 1.3216130868343942e-06,
+      "epochs_run": 41
+    }
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "cache_schema": "walk_forward_v1",
+  "target": "High",
+  "decomposition_mode": "iceemdan_pso_vmd",
+  "decomposition_scope": "walk_forward",
+  "model_variant": "proposed",
+  "time_scale": 1,
+  "window_size": 3,
+  "vmd": {
+    "k": 3,
+    "alpha": 2455.0,
+    "pso_fitness": 0.965302024792751
+  },
+  "parameter_selection": {
+    "source": "default_params_walk_forward_validation",
+    "metric": "RMSE",
+    "score": 22.63538888291639,
+    "validation_metrics": {
+      "MAPE": 0.5810287579235819,
+      "MAE": 18.720100052759676,
+      "RMSE": 22.63538888291639
+    },
+    "shared_params": {
+      "hidden_size": 8,
+      "epochs": 3,
+      "batch_size": 16,
+      "learning_rate": 0.001
+    },
+    "candidates_evaluated": 1
+  },
+  "split": {
+    "fit_end_index": 52,
+    "validation_start_index": 52,
+    "validation_end_index": 60,
+    "train_split_index": 60
+  },
+  "components": {
+    "VIMF1": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.04501808062195778,
+      "epochs_run": 3
+    },
+    "VIMF2": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.04785897955298424,
+      "epochs_run": 3
+    },
+    "VIMF3": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.027360526844859123,
+      "epochs_run": 3
+    },
+    "IMF2": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.1895524561405182,
+      "epochs_run": 3
+    },
+    "IMF3": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.010564354248344898,
+      "epochs_run": 3
+    },
+    "Res": {
+      "params": {
+        "hidden_size": 8,
+        "epochs": 3,
+        "batch_size": 16,
+        "learning_rate": 0.001
+      },
+      "best_val_loss": 0.02194872684776783,
+      "epochs_run": 3
+    }
+  }
+}
