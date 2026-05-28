@@ -1,0 +1,138 @@
+# Paper setup:
+# Gong & Xing (2024), Applied Soft Computing.
+# Paper source: Investing.com historical S&P 500 data.
+# S&P 500 daily high/low from 2011-05-02 to 2023-03-31, 3000 samples.
+data:
+  ticker: "^GSPC"
+  start: "2011-05-02"
+  # yfinance end dates are exclusive, so 2023-04-01 includes 2023-03-31.
+  end: "2023-04-01"
+  # Save the Investing.com export here for strict paper replication.
+  # The `download` command remains a Yahoo Finance convenience path and is not
+  # used by this replication config.
+  csv_path: "data/raw/sp500_investing.csv"
+  date_column: "Date"
+  sample_count: 3000
+  strict_paper_sample: true
+  allow_truncate: false
+  raw_output: "data/raw/sp500_yahoo.csv"
+
+experiment:
+  targets: ["High", "Low"]
+  train_ratio: 0.8
+  # Optional extreme-market test split. Example for S&P 500 in the paper: "2020-01-01".
+  train_split_date:
+  validation_ratio: 0.1
+  window_size: 3
+  # Paper robustness test uses T=1 daily, T=5 weekly, T=20 monthly.
+  time_scale: 1
+  random_seed: 42
+  device: "auto"
+
+decomposition:
+  # Options:
+  # - iceemdan_pso_vmd: proposed re-decomposition model
+  # - iceemdan: ablation without VMD re-decomposition
+  # - none: ablation without decomposition
+  mode: "iceemdan_pso_vmd"
+  # Options:
+  # - full_sample: paper-style decomposition of the complete series before splitting.
+  # - train_only_recursive: decompose only the fit window, then recursively
+  #   forecast validation/test horizons without decomposing future data.
+  # - walk_forward: decompose only the fit window for training, then for each
+  #   validation/test day re-decompose actual history up to the previous day.
+  scope: "walk_forward"
+  # The code implements an ICEEMDAN-style ensemble decomposition following
+  # the equations in the paper. Increase ensembles for publication-grade runs.
+  max_imfs: 9
+  ensembles: 100
+  noise_strength: 0.2
+  sift_max_iter: 100
+  sift_tolerance: 0.05
+  random_seed: 42
+
+  pso_particles: 10
+  pso_iterations: 15
+  pso_inertia: 0.7
+  pso_cognitive: 1.5
+  pso_social: 1.5
+  vmd_k_min: 2
+  vmd_k_max: 6
+  vmd_alpha_min: 500
+  vmd_alpha_max: 5000
+  vmd_tau: 0.0
+  vmd_tolerance: 1.0e-7
+  vmd_max_iter: 500
+  # For S&P 500 replication, use Table 4 values from the paper.
+  # Set false to re-run PSO search instead.
+  use_paper_vmd_params: true
+  pso_fitness: "envelope_entropy"
+  paper_vmd_params:
+    High:
+      k: 3
+      alpha: 2455
+    Low:
+      k: 3
+      alpha: 2740
+
+features:
+  # Exogenous OHLC-derived and technical features are concatenated to component
+  # windows as relative/percentage signals, not raw price levels. Forecasting
+  # day t uses feature rows t-window_size through t-1, never the target-day row.
+  enabled: true
+  include_ohlc: true
+  include_volume: true
+  include_technical: true
+  # Keep the residual trend model component-only by default; raw or even
+  # relative features can otherwise destabilize the main price-level trend.
+  use_for_res: false
+
+model:
+  # Variants: proposed, no_attention, no_tcn, no_bilstm,
+  # lstm_sam_tcn, bilstm_sam_cnn.
+  variant: "proposed"
+  # Paper fixed parameters: window=3, Adam, dropout=0.2, TCN filters=32,
+  # kernel=2, dilations=[1,2,4,8], early stopping patience=20.
+  hidden_size: 64
+  hidden_grid: [32, 64, 128]
+  search_hyperparameters: false
+  epochs: 100
+  epoch_grid: [100, 200]
+  batch_size: 32
+  batch_grid: [16, 32, 64, 128]
+  learning_rate: 0.001
+  dropout: 0.2
+  tcn_channels: 32
+  tcn_kernel_size: 2
+  tcn_dilations: [1, 2, 4, 8]
+  patience: 20
+  use_cached_params: true
+  save_best_params: true
+  # Leave blank to use outputs/<run>/best_params_<target>.json.
+  param_cache_path:
+  # true: train neural component models and save their weights.
+  # false: skip training and load saved weights from checkpoint_dir.
+  retrain_model: true
+  checkpoint_dir: "outputs/sp500/model_weights"
+
+conformal:
+  # Adaptive Conformal Inference (Gibbs & Candes, NeurIPS 2021) on top of
+  # model predictions. Scores are |error| divided by causal rolling volatility.
+  enabled: true
+  target_coverage: 0.9
+  # About one trading year. For short validation splits, the method uses all
+  # available validation residuals first, then updates online during testing.
+  rolling_window: 252
+  # Quantile q is estimated from recent standardized errors, so old extreme
+  # regimes do not keep the interval wide forever.
+  calibration_window: 63
+  min_calibration_points: 30
+  gamma: 0.005
+  min_alpha: 0.001
+  max_alpha: 0.5
+  volatility_floor: 1.0e-8
+
+outputs:
+  directory: "outputs/sp500"
+  save_component_predictions: true
+  save_plots: true
