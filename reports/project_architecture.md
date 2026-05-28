@@ -25,7 +25,7 @@ flowchart TD
     N --> P[Sum component predictions]
     O --> P
     P --> Q[Predicted High/Low]
-    Q --> R[ACI conformal post-processing<br/>standardized error / rolling volatility]
+    Q --> R[One-sided ACI post-processing<br/>signed residual / rolling volatility]
     R --> S[HighBound / LowBound<br/>prediction CSV, summary JSON, plot]
     N --> T[Model checkpoints<br/>one .pt per component]
     O --> T
@@ -42,7 +42,7 @@ flowchart TD
 | Window size | `3` days |
 | Feature mode | enabled |
 | Residual uses exogenous features | false |
-| ACI target coverage | `0.9` |
+| ACI target coverage | `0.95` |
 | ACI volatility window | `252` |
 | ACI calibration score window | `63` |
 | Model checkpoint switch | `model.retrain_model` |
@@ -154,20 +154,36 @@ Each checkpoint contains:
 
 ## ACI Boundary Layer
 
-The ACI layer runs after point prediction. It does not change `Predicted`; it adds calibrated bounds.
+The ACI layer runs after point prediction. It does not change `Predicted`; it adds target-specific one-sided calibrated bounds.
 
 ```text
-StandardizedAbsError_t = |Actual_t - Predicted_t| / Volatility_t
-q_t = recent rolling quantile of standardized errors
-HighBound_t = PredictedHigh_t + q_t * Volatility_t
-LowBound_t = PredictedLow_t - q_t * Volatility_t
+r_t = (Actual_t - Predicted_t) / Volatility_t
+
+High:
+q_high,t = recent upper-tail quantile of r_t
+HighBound_t = PredictedHigh_t + q_high,t * Volatility_t
+ErrHigh_t = 1{ActualHigh_t > HighBound_t}
+
+Low:
+q_low,t = recent lower-tail quantile of r_t
+LowBound_t = PredictedLow_t + q_low,t * Volatility_t
+ErrLow_t = 1{ActualLow_t < LowBound_t}
 ```
+
+The exported prediction CSV also includes a band-specific diagnostic:
+
+```text
+BoundBandCovered_t = 1{Actual_t is between Predicted_t and HighBound_t / LowBound_t}
+bound_band_coverage = mean(BoundBandCovered_t)
+```
+
+This is separate from ACI one-sided coverage. For example, High ACI coverage only checks `ActualHigh_t <= HighBound_t`; band coverage additionally requires Actual to sit inside the shaded band between `Predicted` and `HighBound`.
 
 Current ACI settings:
 
 | Setting | Value |
 |---|---:|
-| target coverage | `0.90` |
+| one-sided target coverage | `0.95` |
 | volatility window | `252` |
 | calibration score window | `63` |
 | gamma | `0.005` |

@@ -311,39 +311,48 @@ RollingVolatility20 = 過去 20 天 close return 的 rolling standard deviation
 - 如果市場波動小，邊界自然收窄。
 - ACI 會根據最近 coverage 狀況動態調整 alpha。
 
-目前 High bound 的核心形式是：
+目前改成 one-sided signed ACI，不再用 `|error|` 把方向拿掉。先定義 signed standardized residual：
 
 ```text
-HighBound_t = PredictedHigh_t + q_t * Volatility_t
+r_t = (Actual_t - Predicted_t) / Volatility_t
 ```
 
-Low bound 則是：
+這裡 `r_t > 0` 代表模型低估，`r_t < 0` 代表模型高估。High bound 使用近期 `r_t` 的上尾分位數：
 
 ```text
-LowBound_t = PredictedLow_t - q_t * Volatility_t
+HighBound_t = PredictedHigh_t + q_high,t * Volatility_t
+ErrHigh_t = 1{ActualHigh_t > HighBound_t}
 ```
 
-這一步也回應了你指出的重點：不能直接拿原始誤差去算 q，否則 q 可能被極端行情拉走。
-
-因此目前用的是標準化誤差：
+Low bound 使用近期 `r_t` 的下尾分位數：
 
 ```text
-score_t = |Actual_t - Predicted_t| / Volatility_t
+LowBound_t = PredictedLow_t + q_low,t * Volatility_t
+ErrLow_t = 1{ActualLow_t < LowBound_t}
 ```
 
-然後對近期的 `score_t` 取分位數得到 `q_t`。最後再乘回當天的 `Volatility_t`，得到符合當天波動狀態的邊界。
+這一步回應了兩個重點：第一，不能直接拿原始價格誤差去算 q，否則 q 可能被極端行情拉走；第二，不能只用絕對值誤差，否則會丟掉「模型偏高或偏低」的方向。
+
+因此目前用的是 signed standardized residual：
+
+```text
+r_t = (Actual_t - Predicted_t) / Volatility_t
+```
+
+然後 High 對近期 `r_t` 取上尾分位數得到 `q_high,t`，Low 對近期 `r_t` 取下尾分位數得到 `q_low,t`。最後再乘回當天的 `Volatility_t`，得到符合當天波動狀態與模型偏差方向的邊界。
 
 這樣比較好解釋：
 
-- q 代表「誤差通常是當天波動率的幾倍」。
+- `q_high` 代表「Actual High 超過 Predicted High 時，通常會超過幾個 volatility」。
+- `q_low` 代表「Actual Low 低於 Predicted Low 時，通常會低幾個 volatility」。
 - Volatility_t 代表「今天市場本身有多不穩」。
-- 兩者相乘後，才是今天應該給的價格寬度。
+- q 與 Volatility 相乘後，才是今天應該調整的價格邊界。
 
 ## 10. ACI 的 rolling q：避免舊極端行情長期污染邊界
 
-一開始如果用全部歷史標準化誤差估計 q，會有一個問題：很久以前的極端行情會一直留在 calibration set 裡，導致後面行情平穩時，邊界仍然過寬。
+一開始如果用全部歷史 signed standardized residual 估計 q，會有一個問題：很久以前的極端行情會一直留在 calibration set 裡，導致後面行情平穩時，邊界仍然過寬。
 
-所以後來改成 q 只使用最近一段 calibration window 的標準化誤差。
+所以後來改成 `q_high` / `q_low` 只使用最近一段 calibration window 的 signed standardized residual。
 
 目前設定是：
 
@@ -356,7 +365,7 @@ conformal:
 兩個 window 的意義不同：
 
 - `rolling_window: 252` 是用來估計 volatility，約等於一年交易日。
-- `calibration_window: 63` 是用來估計 q，約等於一季交易日。
+- `calibration_window: 63` 是用來估計 `q_high` / `q_low`，約等於一季交易日。
 
 選 63 的邏輯是：
 
@@ -450,11 +459,14 @@ sum all component predictions
 High / Low point prediction
         |
         v
-ACI with standardized error:
-|error| / volatility
+one-sided signed ACI:
+(actual - predicted) / volatility
         |
         v
 HighBound / LowBound
+        |
+        v
+BoundBandCovered and bound_band_coverage
 ```
 
 ## 14. 各版本的定位
@@ -475,5 +487,4 @@ HighBound / LowBound
 
 如果要跟老師簡短說明整個方法演化，可以說：
 
-> 我們一開始參考 Gong & Xing (2024) 的 ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN 架構，先把 High/Low 序列分解成多個 component，再對每個 component 建模後加總。但實作後發現，如果像論文復刻那樣先對完整序列分解再切 train/test，測試期間資料會影響訓練期間的 IMF 表示，形成資料洩漏。因此我們先嘗試只對 fit 區間分解並遞迴預測未來 component，雖然避免 leakage，但長期會累積誤差。最後改成 walk-forward：預測第 t 天時，只用 t-1 以前的歷史重新分解，這樣既不看未來，也比純遞迴穩定。walk-forward 又遇到每天分解出的 IMF 數可能不同，因此我們把 fit 階段沒有的額外 IMF 折回 Res，維持固定 component layout 與訊號加總關係。之後再加入 causal OHLC features、用 RollingVolatility 取代 ATR，並在點預測上加上 ACI，以標準化誤差 `|error| / volatility` 估計邊界，使 HighBound / LowBound 能隨市場波動自適應調整。
-
+> 我們一開始參考 Gong & Xing (2024) 的 ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN 架構，先把 High/Low 序列分解成多個 component，再對每個 component 建模後加總。但實作後發現，如果像論文復刻那樣先對完整序列分解再切 train/test，測試期間資料會影響訓練期間的 IMF 表示，形成資料洩漏。因此我們先嘗試只對 fit 區間分解並遞迴預測未來 component，雖然避免 leakage，但長期會累積誤差。最後改成 walk-forward：預測第 t 天時，只用 t-1 以前的歷史重新分解，這樣既不看未來，也比純遞迴穩定。walk-forward 又遇到每天分解出的 IMF 數可能不同，因此我們把 fit 階段沒有的額外 IMF 折回 Res，維持固定 component layout 與訊號加總關係。之後再加入 causal OHLC features、用 RollingVolatility 取代 ATR，並在點預測上加上 one-sided signed ACI，以 `(actual - predicted) / volatility` 保留誤差方向，High 用上尾分位數建立 upper bound，Low 用下尾分位數建立 lower bound，使 HighBound / LowBound 能隨市場波動與模型偏差方向自適應調整。

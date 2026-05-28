@@ -19,7 +19,9 @@ class ConformalSummary:
     gamma: float
     calibration_points: int
     realized_coverage: float | None
+    bound_band_coverage: float | None
     mean_width: float | None
+    coverage_definition: str
     reference: str
 
     def as_dict(self) -> dict:
@@ -34,11 +36,12 @@ def add_aci_intervals(
     calibration_frame: pd.DataFrame | None,
     config: ConformalConfig,
 ) -> tuple[pd.DataFrame, ConformalSummary]:
-    """Add volatility-normalized adaptive conformal intervals to predictions.
+    """Add volatility-normalized one-sided adaptive conformal bounds.
 
-    Scores are |actual - prediction| divided by a causal rolling volatility
-    estimate. ACI then adapts the effective miscoverage level online after each
-    observed target.
+    Scores keep the sign of the residual, (actual - prediction), divided by a
+    causal rolling volatility estimate. High uses the upper residual tail;
+    Low uses the lower residual tail. ACI adapts the effective one-sided
+    miscoverage level online after each observed target.
     """
     reference = "Gibbs and Candes (2021), Adaptive Conformal Inference Under Distribution Shift"
     if not config.enabled:
@@ -52,7 +55,9 @@ def add_aci_intervals(
             gamma=config.gamma,
             calibration_points=0,
             realized_coverage=None,
+            bound_band_coverage=None,
             mean_width=None,
+            coverage_definition="disabled",
             reference=reference,
         )
 
@@ -70,13 +75,19 @@ def add_aci_intervals(
         config=config,
     )
     alpha = float(np.clip(1.0 - config.target_coverage, config.min_alpha, config.max_alpha))
+    tail = _target_tail(target)
     scores = list(calibration_scores)
     lower: list[float] = []
     upper: list[float] = []
     q_values: list[float] = []
     alpha_values: list[float] = []
-    standardized_errors: list[float] = []
+    signed_standardized_errors: list[float] = []
+    standardized_abs_errors: list[float] = []
+    bound_offsets: list[float] = []
     covered: list[bool] = []
+    band_lower: list[float] = []
+    band_upper: list[float] = []
+    band_covered: list[bool] = []
 
     actual = prediction_frame["Actual"].to_numpy(dtype=float)
     predicted = prediction_frame["Predicted"].to_numpy(dtype=float)
@@ -88,18 +99,33 @@ def add_aci_intervals(
             alpha=alpha,
             fallback=0.0,
             min_points=config.min_calibration_points,
+            tail=tail,
         )
         q_values.append(q_t)
-        width_t = q_t * vol_t
-        lo_t = pred_t - width_t
-        hi_t = pred_t + width_t
+        offset_t = q_t * vol_t
+        bound_t = pred_t + offset_t
+        bound_offsets.append(offset_t)
+        band_lo_t = min(pred_t, bound_t)
+        band_hi_t = max(pred_t, bound_t)
+        band_lower.append(band_lo_t)
+        band_upper.append(band_hi_t)
+        band_covered.append(bool(band_lo_t <= y_t <= band_hi_t))
+
+        if tail == "upper":
+            lo_t = np.nan
+            hi_t = bound_t
+            is_covered = bool(y_t <= hi_t)
+        else:
+            lo_t = bound_t
+            hi_t = np.nan
+            is_covered = bool(y_t >= lo_t)
         lower.append(lo_t)
         upper.append(hi_t)
-        is_covered = bool(lo_t <= y_t <= hi_t)
         covered.append(is_covered)
 
-        score_t = abs(y_t - pred_t) / vol_t
-        standardized_errors.append(score_t)
+        score_t = (y_t - pred_t) / vol_t
+        signed_standardized_errors.append(score_t)
+        standardized_abs_errors.append(abs(score_t))
         scores.append(float(score_t))
         alpha = float(
             np.clip(
@@ -111,9 +137,15 @@ def add_aci_intervals(
 
     enriched = prediction_frame.copy()
     enriched["Volatility"] = volatility
-    enriched["StandardizedAbsError"] = standardized_errors
+    enriched["SignedStandardizedError"] = signed_standardized_errors
+    enriched["StandardizedAbsError"] = standardized_abs_errors
     enriched["ACIAlpha"] = alpha_values
     enriched["ConformalQ"] = q_values
+    enriched["ConformalTail"] = tail
+    enriched["ConformalBoundOffset"] = bound_offsets
+    enriched["BoundBandLower"] = band_lower
+    enriched["BoundBandUpper"] = band_upper
+    enriched["BoundBandCovered"] = band_covered
     enriched["LowerBound"] = lower
     enriched["UpperBound"] = upper
     enriched["Covered"] = covered
@@ -122,10 +154,10 @@ def add_aci_intervals(
     elif target == "Low":
         enriched["LowBound"] = enriched["LowerBound"]
 
-    widths = enriched["UpperBound"] - enriched["LowerBound"]
+    bound_widths = np.abs(np.asarray(bound_offsets, dtype=float))
     summary = ConformalSummary(
         enabled=True,
-        method="ACI with volatility-normalized absolute residual scores",
+        method=f"one-sided ACI with volatility-normalized signed residual scores ({tail} tail)",
         target_coverage=config.target_coverage,
         rolling_window=config.rolling_window,
         calibration_window=config.calibration_window,
@@ -133,10 +165,23 @@ def add_aci_intervals(
         gamma=config.gamma,
         calibration_points=len(calibration_scores),
         realized_coverage=float(np.mean(covered)) if covered else None,
-        mean_width=float(np.mean(widths)) if len(widths) else None,
+        bound_band_coverage=float(np.mean(band_covered)) if band_covered else None,
+        mean_width=float(np.mean(bound_widths)) if len(bound_widths) else None,
+        coverage_definition=(
+            "realized_coverage is one-sided ACI coverage; "
+            "bound_band_coverage is P(Actual lies between Predicted and the target bound)"
+        ),
         reference=reference,
     )
     return enriched, summary
+
+
+def _target_tail(target: str) -> str:
+    if target == "High":
+        return "upper"
+    if target == "Low":
+        return "lower"
+    raise ValueError(f"One-sided ACI only supports High or Low targets, got {target!r}")
 
 
 def causal_rolling_volatility(
@@ -168,9 +213,20 @@ def conformal_quantile(
     alpha: float,
     fallback: float,
     min_points: int,
+    tail: str = "upper",
 ) -> float:
     clean = np.asarray(scores, dtype=float)
     clean = clean[np.isfinite(clean)]
+    if tail == "lower":
+        return -conformal_quantile(
+            -clean,
+            alpha=alpha,
+            fallback=-fallback,
+            min_points=min_points,
+            tail="upper",
+        )
+    if tail != "upper":
+        raise ValueError(f"Unsupported conformal quantile tail: {tail}")
     if len(clean) == 0:
         return float(fallback)
     if len(clean) < min_points:
@@ -196,5 +252,5 @@ def _initial_scores(
     )
     actual = calibration_frame["Actual"].to_numpy(dtype=float)
     predicted = calibration_frame["Predicted"].to_numpy(dtype=float)
-    scores = np.abs(actual - predicted) / volatility
+    scores = (actual - predicted) / volatility
     return [float(score) for score in scores if np.isfinite(score)]

@@ -135,9 +135,9 @@ python -m sp500_forecast.cli smoke
 
 預設輸出到 `outputs/sp500/`：
 
-- `predictions_high.csv` / `predictions_low.csv`：測試集日期、實際值、預測值、誤差，以及 ACI 信賴區間欄位。區間用 `|Error_t| / Volatility_t` 的標準化殘差求分位數；`HighBound = Predicted + q * Volatility_t`，`LowBound = Predicted - q * Volatility_t`。
+- `predictions_high.csv` / `predictions_low.csv`：測試集日期、實際值、預測值、誤差，以及 one-sided ACI 邊界欄位。校準分數保留方向：`r_t = (Actual_t - Predicted_t) / Volatility_t`；High 使用上尾 `q_high` 得到 `HighBound = Predicted + q_high * Volatility_t`，Low 使用下尾 `q_low` 得到 `LowBound = Predicted + q_low * Volatility_t`。另匯出 `BoundBandCovered`，表示 Actual 是否落在 `Predicted` 與 `HighBound` / `LowBound` 之間。
 - `component_predictions_high.csv` / `component_predictions_low.csv`：每個子序列的實際與預測值。
-- `summary_high.json` / `summary_low.json`：MAPE、MAE、RMSE、VMD 最佳參數、每個子模型訓練參數。
+- `summary_high.json` / `summary_low.json`：MAPE、MAE、RMSE、VMD 最佳參數、每個子模型訓練參數，以及 `conformal.bound_band_coverage`，也就是 Actual 落在 `Predicted` 與目標 bound 之間的比率。
 - `best_params_high.json` / `best_params_low.json`：grid search 選出的每個 IMF/VIMF/Res 最佳模型參數；下次若 `model.search_hyperparameters: false` 且 `model.use_cached_params: true`，會自動重用。
 - `decomposition_components_high.csv` / `decomposition_components_low.csv`：full-sample 模式下的 IMF/VIMF/Res 分解序列。
 - `decomposition_fit_components_high.csv` / `decomposition_fit_components_low.csv`：嚴格模式下只用 fit 區間得到的 IMF/VIMF/Res 分解序列。
@@ -170,12 +170,12 @@ python -m sp500_forecast.cli smoke
 - `model.retrain_model: true`：重新訓練每個 component 模型，並把 PyTorch 權重、target scaler、feature scaler 存到 `model.checkpoint_dir`。
 - `model.checkpoint_dir: "outputs/sp500/model_weights"`：模型權重資料夾。程式會依 target 自動分成 `high/`、`low/`，每個 component 會存成一個 `.pt`。
 - `conformal.enabled: true`：在點預測外加上 Adaptive Conformal Inference 區間。
-- `conformal.target_coverage: 0.9`：目標 coverage；等價於初始 `alpha=0.1`。
+- `conformal.target_coverage: 0.95`：單側目標 coverage；HighBound 控制 `ActualHigh <= HighBound`，LowBound 控制 `ActualLow >= LowBound`，等價於初始 `alpha=0.05`。
 - `conformal.rolling_window: 252`：波動率用過去約一個交易年的 target 日變動標準差估計。
-- `conformal.calibration_window: 63`：`q` 只用最近約一季的標準化誤差估計，避免舊極端行情讓後續區間長期偏寬。若要做敏感度，可同時報告 `63`、`126`、`252` 三組。
+- `conformal.calibration_window: 63`：`q_high` / `q_low` 只用最近約一季的 signed standardized residual 估計，避免舊極端行情讓後續邊界長期偏寬。若要做敏感度，可同時報告 `63`、`126`、`252` 三組。
 - `conformal.gamma: 0.005`：ACI 每天根據是否 miss 來微調 alpha；越大反應越快、區間也越容易震盪。
 
-ACI 採用 Gibbs & Candès (2021, NeurIPS) 的適應性共形推論概念；本專案不使用 ATR 來放大/縮小邊界，而是用 target 自身的 causal rolling volatility，避免過度依賴金融技術指標語言。
+ACI 採用 Gibbs & Candès (2021, NeurIPS) 的適應性共形推論概念；本專案不建立同一 target 的 two-sided prediction interval，而是分別建立 High 的 one-sided upper bound 與 Low 的 one-sided lower bound。本專案不使用 ATR 來放大/縮小邊界，而是用 target 自身的 causal rolling volatility，避免過度依賴金融技術指標語言。
 
 若要更貼近論文的子序列逐一試參數，可把 `model.search_hyperparameters` 改成 `true`，程式會在 `hidden_grid`、`epoch_grid`、`batch_grid` 裡搜尋。
 

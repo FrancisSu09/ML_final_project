@@ -30,6 +30,54 @@ features.enabled: true
 features.use_for_res: false
 ```
 
+## Latest. Replace Absolute-Error ACI With Signed One-Sided ACI
+
+The earlier ACI layer used:
+
+```text
+score_t = |Actual_t - Predicted_t| / Volatility_t
+```
+
+That produced a symmetric conformal width, then the plot displayed only the relevant side for High or Low. This was conservative for Low when the point model already underestimated the target, because absolute error removed the direction of the model bias.
+
+The current version uses signed standardized residuals:
+
+```text
+r_t = (Actual_t - Predicted_t) / Volatility_t
+```
+
+High and Low are calibrated as separate one-sided bounds:
+
+```text
+q_high,t = upper-tail quantile of recent r_t
+HighBound_t = PredictedHigh_t + q_high,t * Volatility_t
+ErrHigh_t = 1{ActualHigh_t > HighBound_t}
+
+q_low,t = lower-tail quantile of recent r_t
+LowBound_t = PredictedLow_t + q_low,t * Volatility_t
+ErrLow_t = 1{ActualLow_t < LowBound_t}
+```
+
+This keeps the ACI wrapper idea from Gibbs and Candes (2021), but changes the conformity score to preserve whether the point model is underpredicting or overpredicting. The default target coverage is now `0.95`, so HighBound and LowBound are interpreted as separate 95% one-sided bounds, not a single two-sided 95% interval.
+
+## Latest. Export Coverage Between Predicted And Bound
+
+The ACI `Covered` column answers the one-sided conformal question:
+
+```text
+High: ActualHigh <= HighBound
+Low:  ActualLow >= LowBound
+```
+
+The project now also exports the shaded-band diagnostic requested by the user:
+
+```text
+BoundBandCovered_t = 1{Actual_t lies between Predicted_t and HighBound_t / LowBound_t}
+bound_band_coverage = mean(BoundBandCovered_t)
+```
+
+This is written per row in `predictions_high.csv` / `predictions_low.csv`, and the aggregate ratio is stored in `summary_high.json` / `summary_low.json` under `conformal.bound_band_coverage`.
+
 ## 1. Add ACI Conformal Boundary Instead Of Raw Error Quantile
 
 ### Problem
@@ -542,4 +590,3 @@ The final method is:
 5. Sum component predictions to obtain point forecasts.
 6. Apply ACI with volatility-standardized residuals to obtain HighBound / LowBound.
 7. Save/load component model checkpoints to make experiments repeatable.
-

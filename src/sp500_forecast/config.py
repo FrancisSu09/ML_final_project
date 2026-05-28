@@ -102,7 +102,7 @@ class ModelConfig:
 @dataclass(slots=True)
 class ConformalConfig:
     enabled: bool = True
-    target_coverage: float = 0.9
+    target_coverage: float = 0.95
     rolling_window: int = 252
     calibration_window: int = 63
     min_calibration_points: int = 30

@@ -116,10 +116,12 @@ model:
   checkpoint_dir: "outputs/sp500/model_weights"
 
 conformal:
-  # Adaptive Conformal Inference (Gibbs & Candes, NeurIPS 2021) on top of
-  # model predictions. Scores are |error| divided by causal rolling volatility.
+  # One-sided Adaptive Conformal Inference (Gibbs & Candes, NeurIPS 2021) on top
+  # of model predictions. Scores keep signed residual direction:
+  # (Actual - Predicted) / causal rolling volatility. High uses the upper tail;
+  # Low uses the lower tail.
   enabled: true
-  target_coverage: 0.9
+  target_coverage: 0.95
   # About one trading year. For short validation splits, the method uses all
   # available validation residuals first, then updates online during testing.
   rolling_window: 252
