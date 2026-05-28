@@ -108,6 +108,22 @@ python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --tim
 python -m sp500_forecast.cli --config configs/sp500.yaml run --target both --train-split-date 2020-01-01
 ```
 
+跑資料區間實驗：
+
+```bash
+# 後推版：2011-05-02 到 2026-05-28，test set 也改成較晚的最後 20%
+python -m sp500_forecast.cli --config configs/sp500_2011_2026.yaml download
+python -m sp500_forecast.cli --config configs/sp500_2011_2026.yaml check-data
+python -m sp500_forecast.cli --config configs/sp500_2011_2026.yaml run --target both
+
+# 前推版：2009-01-01 到 2023-03-31，但 test set 固定為目前的 2020-11-11 到 2023-03-31
+python -m sp500_forecast.cli --config configs/sp500_2009_2023_fixed_test.yaml download
+python -m sp500_forecast.cli --config configs/sp500_2009_2023_fixed_test.yaml check-data
+python -m sp500_forecast.cli --config configs/sp500_2009_2023_fixed_test.yaml run --target both
+```
+
+這兩組不可直接當成同一個 test period 比較：`sp500_2011_2026.yaml` 是新的 expanded-period no-leakage experiment；`sp500_2009_2023_fixed_test.yaml` 則是固定原 test 區間、只增加 test 前歷史資料的實驗。
+
 跑消融模型：
 
 ```bash

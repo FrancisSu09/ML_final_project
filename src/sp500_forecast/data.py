@@ -42,6 +42,8 @@ def download_sp500(config: AppConfig) -> Path:
     if isinstance(frame.columns, pd.MultiIndex):
         frame.columns = [col[0] for col in frame.columns]
     frame = frame.reset_index()
+    if "Date" not in frame.columns and "index" in frame.columns:
+        frame = frame.rename(columns={"index": "Date"})
     frame.to_csv(out_path, index=False)
     return out_path
 
