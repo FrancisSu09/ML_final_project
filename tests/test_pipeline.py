@@ -4,7 +4,12 @@ import numpy as np
 
 from sp500_forecast.config import AppConfig
 from sp500_forecast.decomposition import Component, DecompositionResult
-from sp500_forecast.pipeline import _align_walk_forward_components, _features_for_component
+from sp500_forecast.pipeline import (
+    _align_walk_forward_components,
+    _features_for_component,
+    _restore_price_predictions,
+    _target_model_signal,
+)
 
 
 def test_walk_forward_alignment_folds_extra_components_into_residual() -> None:
@@ -45,3 +50,20 @@ def test_residual_component_skips_exogenous_features_by_default() -> None:
         _features_for_component("IMF2", features, config=config),
         features,
     )
+
+
+def test_delta_target_transform_reconstructs_price_from_previous_value() -> None:
+    config = AppConfig()
+    config.experiment.target_transform = "delta"
+    price = np.array([100.0, 103.0, 101.0, 108.0])
+
+    model_signal = _target_model_signal(price, config=config)
+    reconstructed = _restore_price_predictions(
+        np.array([2.5, -1.0]),
+        price_signal=price,
+        target_indices=np.array([2, 3]),
+        config=config,
+    )
+
+    np.testing.assert_allclose(model_signal, [0.0, 3.0, -2.0, 7.0])
+    np.testing.assert_allclose(reconstructed, [105.5, 100.0])

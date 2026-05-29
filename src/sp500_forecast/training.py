@@ -451,6 +451,7 @@ def save_component_forecaster(
     payload = {
         "checkpoint_schema": "component_forecaster_v1",
         "target": target,
+        "target_transform": str(config.experiment.target_transform),
         "component": forecaster.name,
         "input_size": _model_input_size(forecaster.model),
         "model_architecture": _model_architecture(config),
@@ -490,6 +491,12 @@ def load_component_forecaster(
         raise ValueError(
             f"Checkpoint architecture mismatch for {checkpoint_path}. "
             f"Saved={saved_architecture}, current={expected_architecture}"
+        )
+    saved_transform = str(payload.get("target_transform", "level"))
+    if saved_transform != str(config.experiment.target_transform):
+        raise ValueError(
+            f"Checkpoint target_transform mismatch for {checkpoint_path}. "
+            f"Saved={saved_transform}, current={config.experiment.target_transform}"
         )
     if bool(payload.get("uses_features")) and not config.features.enabled:
         raise ValueError(

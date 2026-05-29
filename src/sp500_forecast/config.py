@@ -26,6 +26,7 @@ class DataConfig:
 @dataclass(slots=True)
 class ExperimentConfig:
     targets: list[str] = field(default_factory=lambda: ["High", "Low"])
+    target_transform: str = "delta"
     train_ratio: float = 0.8
     train_split_date: str | None = None
     validation_ratio: float = 0.1

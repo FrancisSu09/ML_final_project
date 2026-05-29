@@ -9,22 +9,25 @@ flowchart TD
     A[Investing/Yahoo OHLC data<br/>Date, Open, High, Low, Close] --> B[Data validation and time scaling<br/>T=1 daily, 5 weekly, 20 monthly]
     B --> C[Target loop<br/>High and Low are trained independently]
     B --> F[Feature builder<br/>19 causal relative/technical features]
-    C --> D[Train/validation/test split<br/>fit -> validation -> test]
+    C --> U[Target transform<br/>price level -> one-step price change]
+    U --> D[Train/validation/test split<br/>fit -> validation -> test]
     D --> E[Decomposition scope: walk_forward]
     E --> G[ICEEMDAN]
     G --> H[IMF1]
     H --> I[PSO-VMD<br/>paper K/alpha by target]
     I --> J[VIMF components]
-    G --> K[IMF2..IMF7 components]
+    G --> K[IMF2..IMF9 components]
     G --> L[Residual component]
     F --> M[Feature windows<br/>t-3 to t-1 only]
     J --> N[One neural model per component]
     K --> N
     L --> O[Residual neural model<br/>component only]
     M --> N
-    N --> P[Sum component predictions]
+    N --> P[Sum component predictions<br/>PredictedDelta]
     O --> P
-    P --> Q[Predicted High/Low]
+    B --> V[NaivePreviousValue<br/>previous actual High/Low]
+    P --> Q[Restore price<br/>Predicted = previous value + PredictedDelta]
+    V --> Q
     Q --> R[One-sided ACI post-processing<br/>signed residual / rolling volatility]
     R --> S[HighBound / LowBound<br/>prediction CSV, summary JSON, plot]
     N --> T[Model checkpoints<br/>one .pt per component]
@@ -36,6 +39,7 @@ flowchart TD
 | Area | Current setting |
 |---|---|
 | Targets | `High`, `Low` |
+| Target transform | `delta` |
 | Decomposition mode | `iceemdan_pso_vmd` |
 | Decomposition scope | `walk_forward` |
 | Neural variant | `proposed` |
@@ -46,7 +50,26 @@ flowchart TD
 | ACI volatility window | `252` |
 | ACI calibration score window | `63` |
 | Model checkpoint switch | `model.retrain_model` |
-| Checkpoint directory | `outputs/sp500/model_weights/{target}/` |
+| Checkpoint directory | `outputs/sp500/model_weights_delta/{target}/` |
+
+## Target Transform
+
+The current run keeps the paper's decomposition and component-model structure, but changes what the model forecasts.
+
+Original paper-style target:
+
+```text
+Price level -> ICEEMDAN/VMD -> component levels -> predict component levels -> sum to price
+```
+
+Current default target:
+
+```text
+Price change -> ICEEMDAN/VMD -> component changes -> predict next change -> restore price
+PredictedPrice_t = NaivePreviousValue_t + ModelPredictedDelta_t
+```
+
+This is controlled by `experiment.target_transform`. Use `level` to restore the old direct price-level forecast.
 
 ## Feature Set
 
@@ -65,7 +88,7 @@ If a future input CSV contains `Volume`, the code can add `VolumeChangePct` and 
 
 ## Component Models And Feature Counts
 
-Each target is decomposed and then trained as a collection of component models. Current High output has 10 component models. Low uses the same component layout when rerun under the current code.
+Each transformed target is decomposed and then trained as a collection of component models. In the default `delta` mode, these components represent price-change components, not raw price-level components. The current High and Low outputs each have 12 component models.
 
 For non-residual components:
 
@@ -92,6 +115,8 @@ window input shape = 3 days x 1 feature
 | High | `IMF5` | 19 | 1 | 20 | `3 x 20` |
 | High | `IMF6` | 19 | 1 | 20 | `3 x 20` |
 | High | `IMF7` | 19 | 1 | 20 | `3 x 20` |
+| High | `IMF8` | 19 | 1 | 20 | `3 x 20` |
+| High | `IMF9` | 19 | 1 | 20 | `3 x 20` |
 | High | `Res` | 0 | 1 | 1 | `3 x 1` |
 | Low | `VIMF1` | 19 | 1 | 20 | `3 x 20` |
 | Low | `VIMF2` | 19 | 1 | 20 | `3 x 20` |
@@ -102,6 +127,8 @@ window input shape = 3 days x 1 feature
 | Low | `IMF5` | 19 | 1 | 20 | `3 x 20` |
 | Low | `IMF6` | 19 | 1 | 20 | `3 x 20` |
 | Low | `IMF7` | 19 | 1 | 20 | `3 x 20` |
+| Low | `IMF8` | 19 | 1 | 20 | `3 x 20` |
+| Low | `IMF9` | 19 | 1 | 20 | `3 x 20` |
 | Low | `Res` | 0 | 1 | 1 | `3 x 1` |
 
 ## Neural Model Variants
@@ -128,7 +155,7 @@ The same component input design is used across variants; the difference is the n
 With the current paper VMD parameters for S&P 500, `K=3`, so the current component layout is:
 
 ```text
-VIMF1, VIMF2, VIMF3, IMF2, IMF3, IMF4, IMF5, IMF6, IMF7, Res
+VIMF1, VIMF2, VIMF3, IMF2, IMF3, IMF4, IMF5, IMF6, IMF7, IMF8, IMF9, Res
 ```
 
 ## Checkpoint Flow
@@ -137,7 +164,7 @@ VIMF1, VIMF2, VIMF3, IMF2, IMF3, IMF4, IMF5, IMF6, IMF7, Res
 flowchart LR
     A[model.retrain_model=true] --> B[Train component models]
     B --> C[Save one .pt per component]
-    C --> D[outputs/sp500/model_weights/high/*.pt<br/>outputs/sp500/model_weights/low/*.pt]
+    C --> D[outputs/sp500/model_weights_delta/high/*.pt<br/>outputs/sp500/model_weights_delta/low/*.pt]
     E[model.retrain_model=false<br/>or --load-weights] --> F[Load .pt files]
     F --> G[Skip neural training]
     G --> H[Predict validation/test windows]
@@ -149,6 +176,7 @@ Each checkpoint contains:
 - target `MinMaxScaler1D`
 - optional feature `StandardScaler2D`
 - model architecture metadata
+- target transform metadata
 - selected training params
 - validation loss / epochs run
 

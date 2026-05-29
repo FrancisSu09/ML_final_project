@@ -42,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override experiment.train_split_date, e.g. 2020-01-01 for the paper's S&P 500 extreme-market test.",
     )
     run_parser.add_argument(
+        "--target-transform",
+        choices=["level", "delta"],
+        default=None,
+        help="Override experiment.target_transform. level predicts price directly; delta predicts price change and reconstructs price.",
+    )
+    run_parser.add_argument(
         "--decomposition-mode",
         choices=["iceemdan_pso_vmd", "iceemdan", "none"],
         default=None,
@@ -126,6 +132,8 @@ def main() -> None:
             config.experiment.time_scale = args.time_scale
         if args.train_split_date is not None:
             config.experiment.train_split_date = args.train_split_date
+        if args.target_transform is not None:
+            config.experiment.target_transform = args.target_transform
         if args.decomposition_mode is not None:
             config.decomposition.mode = args.decomposition_mode
         if args.decomposition_scope is not None:

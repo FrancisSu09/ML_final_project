@@ -432,6 +432,9 @@ model:
 Raw S&P 500 High / Low
         |
         v
+One-step price change target
+        |
+        v
 Train / validation / test split
         |
         v
@@ -453,10 +456,13 @@ BiLSTM -> SAM attention -> TCN -> dense head
 component next-day prediction
         |
         v
-sum all component predictions
+sum component change predictions
         |
         v
-High / Low point prediction
+PredictedDelta
+        |
+        v
+PredictedPrice_t = NaivePreviousValue_t + PredictedDelta_t
         |
         v
 one-sided signed ACI:
@@ -480,6 +486,7 @@ BoundBandCovered and bound_band_coverage
 | walk_forward | 避免 leakage，又減少長期遞迴漂移 | 每天分解成本高，component 數可能不一致 | 目前主流程 |
 | walk_forward + fold extras into Res | 解決 component mismatch | Res 會承接額外 IMF，需在報告說明 | 目前主流程的一部分 |
 | features | 補充 OHLC 與技術上下文 | 需嚴格避免 target-day feature leakage | 目前主流程 |
+| delta target | 減少直接價格 level 外推造成的系統性高估/低估 | 圖與 summary 要重新解釋成「預測變化量後還原價格」 | 目前主流程 |
 | ACI | 給出有 coverage 概念的邊界 | 不改善點預測本身，只校準區間 | 目前主流程 |
 | checkpoints | 避免每次重訓，提高可重現性 | 權重需和 config / scaler 對應 | 工程支援功能 |
 
@@ -487,4 +494,4 @@ BoundBandCovered and bound_band_coverage
 
 如果要跟老師簡短說明整個方法演化，可以說：
 
-> 我們一開始參考 Gong & Xing (2024) 的 ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN 架構，先把 High/Low 序列分解成多個 component，再對每個 component 建模後加總。但實作後發現，如果像論文復刻那樣先對完整序列分解再切 train/test，測試期間資料會影響訓練期間的 IMF 表示，形成資料洩漏。因此我們先嘗試只對 fit 區間分解並遞迴預測未來 component，雖然避免 leakage，但長期會累積誤差。最後改成 walk-forward：預測第 t 天時，只用 t-1 以前的歷史重新分解，這樣既不看未來，也比純遞迴穩定。walk-forward 又遇到每天分解出的 IMF 數可能不同，因此我們把 fit 階段沒有的額外 IMF 折回 Res，維持固定 component layout 與訊號加總關係。之後再加入 causal OHLC features、用 RollingVolatility 取代 ATR，並在點預測上加上 one-sided signed ACI，以 `(actual - predicted) / volatility` 保留誤差方向，High 用上尾分位數建立 upper bound，Low 用下尾分位數建立 lower bound，使 HighBound / LowBound 能隨市場波動與模型偏差方向自適應調整。
+> 我們一開始參考 Gong & Xing (2024) 的 ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN 架構，先把 High/Low 序列分解成多個 component，再對每個 component 建模後加總。但實作後發現，如果像論文復刻那樣先對完整序列分解再切 train/test，測試期間資料會影響訓練期間的 IMF 表示，形成資料洩漏。因此我們先嘗試只對 fit 區間分解並遞迴預測未來 component，雖然避免 leakage，但長期會累積誤差。最後改成 walk-forward：預測第 t 天時，只用 t-1 以前的歷史重新分解，這樣既不看未來，也比純遞迴穩定。walk-forward 又遇到每天分解出的 IMF 數可能不同，因此我們把 fit 階段沒有的額外 IMF 折回 Res，維持固定 component layout 與訊號加總關係。後來我們發現直接用價格 level 訓練時，train/test 價格水準一變就會產生系統性低估或高估，所以保留 decomposition 與 component model 架構，但把 target 改成 one-step price change：先分解變化量、預測下一期變化量，再用前一日價格還原成 High/Low。之後再加入 causal OHLC features、用 RollingVolatility 取代 ATR，並在點預測上加上 one-sided signed ACI，以 `(actual - predicted) / volatility` 保留誤差方向，High 用上尾分位數建立 upper bound，Low 用下尾分位數建立 lower bound，使 HighBound / LowBound 能隨市場波動與模型偏差方向自適應調整。

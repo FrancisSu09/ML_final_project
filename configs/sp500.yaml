@@ -19,6 +19,11 @@ data:
 
 experiment:
   targets: ["High", "Low"]
+  # Preserve the paper's decomposition/component-model architecture, but train
+  # it on one-step price changes to avoid price-level extrapolation anchoring.
+  # level: Price -> decomposition -> predict component levels -> sum to price.
+  # delta: Price change -> decomposition -> predict component changes -> add to previous price.
+  target_transform: "delta"
   train_ratio: 0.8
   # Optional extreme-market test split. Example for S&P 500 in the paper: "2020-01-01".
   train_split_date:
@@ -113,7 +118,7 @@ model:
   # true: train neural component models and save their weights.
   # false: skip training and load saved weights from checkpoint_dir.
   retrain_model: true
-  checkpoint_dir: "outputs/sp500/model_weights"
+  checkpoint_dir: "outputs/sp500/model_weights_delta"
 
 conformal:
   # One-sided Adaptive Conformal Inference (Gibbs & Candes, NeurIPS 2021) on top

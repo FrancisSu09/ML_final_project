@@ -587,6 +587,83 @@ The final method is:
 2. Train one BiLSTM-SAM-TCN model per component.
 3. Concatenate 19 causal exogenous features to every non-residual component window.
 4. Keep residual component model feature-free for stability.
-5. Sum component predictions to obtain point forecasts.
-6. Apply ACI with volatility-standardized residuals to obtain HighBound / LowBound.
-7. Save/load component model checkpoints to make experiments repeatable.
+5. In the current default, train and forecast component changes rather than component price levels.
+6. Sum component predictions into `PredictedDelta`, then reconstruct price with `PredictedPrice_t = NaivePreviousValue_t + PredictedDelta_t`.
+7. Apply ACI with volatility-standardized residuals to obtain HighBound / LowBound.
+8. Save/load component model checkpoints to make experiments repeatable.
+
+## 11. Delta-Target Revision
+
+### Problem
+
+The full S&P 500 paper-window experiment showed systematic point-forecast bias:
+
+```text
+original 2011-2023 run: train level below test level -> model underpredicted
+downtrend probe: train level above test level -> model overpredicted
+```
+
+This indicated that direct price-level modeling was the main problem: the component models learned the training price level and had weak extrapolation when the test regime moved above or below the fit regime.
+
+### Decision
+
+Keep the reference paper's architecture but change the target definition:
+
+```text
+Old:
+Price -> ICEEMDAN/VMD -> component level -> predict component level -> sum to price
+
+New default:
+Price change -> ICEEMDAN/VMD -> component changes -> predict next change -> restore price
+
+PredictedPrice_t = NaivePreviousValue_t + ModelPredictedDelta_t
+```
+
+This preserves:
+
+- ICEEMDAN first decomposition;
+- VMD re-decomposition of the first IMF;
+- one neural model per VIMF/IMF/Res component;
+- BiLSTM -> SAM attention -> TCN -> dense head;
+- walk-forward no-leakage decomposition;
+- one-sided ACI boundary layer.
+
+It changes only the modeling target from absolute price level to one-step price change.
+
+### Code Changes
+
+Added:
+
+```text
+experiment.target_transform: "delta"
+```
+
+Supported values:
+
+```text
+delta: decompose/forecast one-step price changes, then restore price
+level: old direct price-level decomposition/forecasting
+```
+
+Prediction CSVs in delta mode now include:
+
+```text
+PredictedDelta
+Predicted = NaivePreviousValue + PredictedDelta
+```
+
+Summaries record:
+
+```text
+target_transform
+model_training_target
+prediction_reconstruction
+```
+
+Checkpoint metadata also records `target_transform`, and the default checkpoint directory moved to:
+
+```text
+outputs/sp500/model_weights_delta
+```
+
+so old level checkpoints are not accidentally reused.

@@ -2,13 +2,15 @@
 
 這個專案依照論文 **Gong & Xing (2024), “Predicting the highest and lowest stock price indices: A combined BiLSTM-SAM-TCN deep learning model based on re-decomposition”** 的流程，實作 S&P 500 daily High / Low 預測。此版本以「可審核復刻」為目標：VMD 採標準 ADMM 流程、SAM 採論文 additive attention 公式，並預設使用論文 Table 4 的 S&P 500 VMD 參數。
 
-模型流程：
+模型流程目前保留論文的 decomposition / component-model 骨架，但預設把模型目標改成「下一期價格變化量」，再用前一日價格還原成 High / Low：
 
-1. 對原始序列做 ICEEMDAN 初分解，得到 `IMF1 ... IMFm` 與 `Res`。
-2. 將最高頻的 `IMF1` 用 PSO 搜尋 VMD 的最佳 `K` 與 `alpha`，再做 VMD 二次分解。
-3. 對每個 `VIMF`、其餘 `IMF`、`Res` 分別訓練 `BiLSTM-SAM-TCN`。
-4. 將所有子序列預測值線性加總，得到最終 High 或 Low 預測。
-5. 輸出 `MAPE`、`MAE`、`RMSE`，並附上與 naive previous-value baseline 的 MDM 檢定。
+1. 將 High / Low 價格轉成 one-step price change；若 `experiment.target_transform: level`，則回到舊版直接預測價格 level。
+2. 對目標序列做 ICEEMDAN 初分解，得到 `IMF1 ... IMFm` 與 `Res`。
+3. 將最高頻的 `IMF1` 用 PSO 搜尋 VMD 的最佳 `K` 與 `alpha`，再做 VMD 二次分解。
+4. 對每個 `VIMF`、其餘 `IMF`、`Res` 分別訓練 `BiLSTM-SAM-TCN`。
+5. 將所有 component 預測的變化量線性加總成 `PredictedDelta`。
+6. 用 `PredictedPrice_t = NaivePreviousValue_t + PredictedDelta_t` 還原 High 或 Low 預測。
+7. 輸出 `MAPE`、`MAE`、`RMSE`，並附上與 naive previous-value baseline 的 MDM 檢定。
 
 ## 安裝
 
@@ -61,8 +63,8 @@ python -m sp500_forecast.cli --config configs/sp500.yaml run --target both
 - 只用 fit 區間做 ICEEMDAN / VMD 分解。
 - validation 與 test 不會進入 fit decomposition。
 - 預設會將 OHLC 衍生的比例特徵與技術指標作為外生特徵接到 VIMF/IMF component model；預測第 `t` 天時只使用 `t-window_size` 到 `t-1` 的 feature window，不使用第 `t` 天資料。`Res` 預設維持 component-only，避免主趨勢被外生特徵拉歪。
-- Grid search 會對每組候選參數訓練所有 component model，並對 validation 每一天重新分解「截至前一天」的真實價格歷史，再以 validation RMSE 選最佳參數。
-- Test evaluation 使用選出的參數，對 test 每一天重新分解「截至前一天」的真實價格歷史，取最新 IMF/VIMF/Res window 預測下一天，再加總成價格預測。
+- Grid search 會對每組候選參數訓練所有 component model，並對 validation 每一天重新分解「截至前一天」的真實目標序列；預設目標序列是 price change，再以還原後價格的 validation RMSE 選最佳參數。
+- Test evaluation 使用選出的參數，對 test 每一天重新分解「截至前一天」的真實目標序列，取最新 IMF/VIMF/Res window 預測下一天變化量，再加回前一日價格成為價格預測。
 - Min-Max scaler 只用真正 fitting subset 估計 min/max，不含 validation/test target。
 
 若要跑原本不含外生特徵的 component-only baseline：
@@ -151,7 +153,7 @@ python -m sp500_forecast.cli smoke
 
 預設輸出到 `outputs/sp500/`：
 
-- `predictions_high.csv` / `predictions_low.csv`：測試集日期、實際值、預測值、誤差，以及 one-sided ACI 邊界欄位。校準分數保留方向：`r_t = (Actual_t - Predicted_t) / Volatility_t`；High 使用上尾 `q_high` 得到 `HighBound = Predicted + q_high * Volatility_t`，Low 使用下尾 `q_low` 得到 `LowBound = Predicted + q_low * Volatility_t`。另匯出 `BoundBandCovered`，表示 Actual 是否落在 `Predicted` 與 `HighBound` / `LowBound` 之間。
+- `predictions_high.csv` / `predictions_low.csv`：測試集日期、實際值、預測值、誤差，以及 one-sided ACI 邊界欄位。delta 模式會額外輸出 `PredictedDelta`，其中 `Predicted = NaivePreviousValue + PredictedDelta`。校準分數保留方向：`r_t = (Actual_t - Predicted_t) / Volatility_t`；High 使用上尾 `q_high` 得到 `HighBound = Predicted + q_high * Volatility_t`，Low 使用下尾 `q_low` 得到 `LowBound = Predicted + q_low * Volatility_t`。另匯出 `BoundBandCovered`，表示 Actual 是否落在 `Predicted` 與 `HighBound` / `LowBound` 之間。
 - `component_predictions_high.csv` / `component_predictions_low.csv`：每個子序列的實際與預測值。
 - `summary_high.json` / `summary_low.json`：MAPE、MAE、RMSE、VMD 最佳參數、每個子模型訓練參數，以及 `conformal.bound_band_coverage`，也就是 Actual 落在 `Predicted` 與目標 bound 之間的比率。
 - `best_params_high.json` / `best_params_low.json`：grid search 選出的每個 IMF/VIMF/Res 最佳模型參數；下次若 `model.search_hyperparameters: false` 且 `model.use_cached_params: true`，會自動重用。
@@ -166,6 +168,7 @@ python -m sp500_forecast.cli smoke
 主要參數集中在 `configs/sp500.yaml`：
 
 - `experiment.window_size: 3`：論文設定的時間視窗。
+- `experiment.target_transform: "delta"`：預設讓 decomposition 和 component model 學習 one-step price change，最後用 `PredictedPrice_t = NaivePreviousValue_t + PredictedDelta_t` 還原價格；改成 `"level"` 可回到原本直接預測價格 level 的流程。
 - `experiment.train_ratio: 0.8`：前 80% 訓練、後 20% 測試。
 - `experiment.train_split_date`：指定日期切分訓練/測試；留空時使用 `train_ratio`。
 - `experiment.time_scale: 1`：`1` 是 daily；改成 `5` 可跑 weekly robustness，改成 `20` 可跑 monthly robustness。
@@ -184,7 +187,7 @@ python -m sp500_forecast.cli smoke
 - `model.use_cached_params: true`：不開 grid search 時，若有 `best_params_<target>.json` 就直接重用。
 - `model.save_best_params: true`：每次訓練後存出各 component 最佳參數。
 - `model.retrain_model: true`：重新訓練每個 component 模型，並把 PyTorch 權重、target scaler、feature scaler 存到 `model.checkpoint_dir`。
-- `model.checkpoint_dir: "outputs/sp500/model_weights"`：模型權重資料夾。程式會依 target 自動分成 `high/`、`low/`，每個 component 會存成一個 `.pt`。
+- `model.checkpoint_dir: "outputs/sp500/model_weights_delta"`：模型權重資料夾。程式會依 target 自動分成 `high/`、`low/`，每個 component 會存成一個 `.pt`。checkpoint 會記錄 `target_transform`，避免誤載舊版 level 模型權重。
 - `conformal.enabled: true`：在點預測外加上 Adaptive Conformal Inference 區間。
 - `conformal.target_coverage: 0.95`：單側目標 coverage；HighBound 控制 `ActualHigh <= HighBound`，LowBound 控制 `ActualLow >= LowBound`，等價於初始 `alpha=0.05`。
 - `conformal.rolling_window: 252`：波動率用過去約一個交易年的 target 日變動標準差估計。

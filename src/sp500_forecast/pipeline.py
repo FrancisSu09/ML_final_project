@@ -127,7 +127,8 @@ def _run_one_target(
     feature_values: np.ndarray | None,
     feature_names: list[str],
 ) -> TargetRunResult:
-    signal = frame[target].to_numpy(dtype=float)
+    price_signal = frame[target].to_numpy(dtype=float)
+    model_signal = _target_model_signal(price_signal, config=config)
     dates = pd.to_datetime(frame["Date"]).reset_index(drop=True)
     device = choose_device(config.experiment.device)
     split_index = effective_split_index(
@@ -139,7 +140,8 @@ def _run_one_target(
     stem = target.lower()
     if config.decomposition.scope == "full_sample":
         return _run_full_sample_decomposition(
-            signal=signal,
+            price_signal=price_signal,
+            model_signal=model_signal,
             dates=dates,
             target=target,
             stem=stem,
@@ -152,7 +154,8 @@ def _run_one_target(
         )
     if config.decomposition.scope == "train_only_recursive":
         return _run_train_only_recursive_decomposition(
-            signal=signal,
+            price_signal=price_signal,
+            model_signal=model_signal,
             dates=dates,
             target=target,
             stem=stem,
@@ -165,7 +168,8 @@ def _run_one_target(
         )
     if config.decomposition.scope == "walk_forward":
         return _run_walk_forward_decomposition(
-            signal=signal,
+            price_signal=price_signal,
+            model_signal=model_signal,
             dates=dates,
             target=target,
             stem=stem,
@@ -193,9 +197,85 @@ def effective_split_index(
     return int(np.clip(split_index, 1, len(dates) - 1))
 
 
+def _target_transform(config: AppConfig) -> str:
+    value = str(config.experiment.target_transform).strip().lower()
+    aliases = {
+        "price": "level",
+        "price_level": "level",
+        "level": "level",
+        "change": "delta",
+        "price_change": "delta",
+        "return_delta": "delta",
+        "delta": "delta",
+    }
+    if value not in aliases:
+        raise ValueError(
+            "experiment.target_transform must be 'level' or 'delta' "
+            f"(got {config.experiment.target_transform!r})"
+        )
+    return aliases[value]
+
+
+def _target_model_signal(price_signal: np.ndarray, *, config: AppConfig) -> np.ndarray:
+    """Return the series that decomposition/component models should forecast."""
+    values = np.asarray(price_signal, dtype=float)
+    transform = _target_transform(config)
+    if transform == "level":
+        return values.copy()
+    delta = np.zeros_like(values, dtype=float)
+    delta[1:] = values[1:] - values[:-1]
+    return delta
+
+
+def _restore_price_predictions(
+    model_predicted: np.ndarray,
+    *,
+    price_signal: np.ndarray,
+    target_indices: np.ndarray,
+    config: AppConfig,
+) -> np.ndarray:
+    """Map component-level model outputs back to the reported price forecast."""
+    predicted = np.asarray(model_predicted, dtype=float)
+    transform = _target_transform(config)
+    if transform == "level":
+        return predicted
+    indices = np.asarray(target_indices, dtype=int)
+    if np.any(indices <= 0):
+        raise ValueError("delta target_transform requires target indices greater than zero")
+    return np.asarray(price_signal, dtype=float)[indices - 1] + predicted
+
+
+def _predicted_delta_column(
+    model_predicted: np.ndarray,
+    *,
+    config: AppConfig,
+) -> np.ndarray | None:
+    if _target_transform(config) != "delta":
+        return None
+    return np.asarray(model_predicted, dtype=float)
+
+
+def _target_transform_summary(config: AppConfig) -> dict:
+    transform = _target_transform(config)
+    if transform == "level":
+        return {
+            "target_transform": "level",
+            "model_training_target": "price_level_component_values",
+            "prediction_reconstruction": "PredictedPrice_t = sum(ModelPredictedComponentLevel_t)",
+        }
+    return {
+        "target_transform": "delta",
+        "model_training_target": "price_change_component_values",
+        "prediction_reconstruction": (
+            "PredictedPrice_t = NaivePreviousValue_t + ModelPredictedDelta_t"
+        ),
+    }
+
+
 def _run_full_sample_decomposition(
     *,
-    signal: np.ndarray,
+    price_signal: np.ndarray,
+    model_signal: np.ndarray,
     dates: pd.Series,
     target: str,
     stem: str,
@@ -206,7 +286,7 @@ def _run_full_sample_decomposition(
     feature_values: np.ndarray | None,
     feature_names: list[str],
 ) -> TargetRunResult:
-    decomposition = decompose_signal(signal, config.decomposition, target=target)
+    decomposition = decompose_signal(model_signal, config.decomposition, target=target)
     params_path = _param_cache_path(config, output_dir=output_dir, stem=stem)
     cached_params = _load_cached_params(params_path, config=config)
     checkpoint_dir = _checkpoint_dir(config, output_dir=output_dir, stem=stem)
@@ -239,9 +319,15 @@ def _run_full_sample_decomposition(
         if not np.array_equal(target_indices, prediction.target_indices):
             raise RuntimeError("Component predictions are not aligned on the same target indices")
 
-    predicted = np.sum([prediction.predicted for prediction in component_predictions], axis=0)
-    actual = signal[target_indices]
-    naive = signal[target_indices - 1]
+    model_predicted = np.sum([prediction.predicted for prediction in component_predictions], axis=0)
+    predicted = _restore_price_predictions(
+        model_predicted,
+        price_signal=price_signal,
+        target_indices=target_indices,
+        config=config,
+    )
+    actual = price_signal[target_indices]
+    naive = price_signal[target_indices - 1]
     metrics = regression_metrics(actual, predicted)
     naive_metrics = regression_metrics(actual, naive)
     mdm = {
@@ -260,10 +346,13 @@ def _run_full_sample_decomposition(
             "Error": predicted - actual,
         }
     )
+    predicted_delta = _predicted_delta_column(model_predicted, config=config)
+    if predicted_delta is not None:
+        prediction_frame["PredictedDelta"] = predicted_delta
     prediction_frame, conformal_summary = add_aci_intervals(
         prediction_frame,
         target=target,
-        signal=signal,
+        signal=price_signal,
         calibration_frame=None,
         config=config.conformal,
     )
@@ -312,11 +401,12 @@ def _run_full_sample_decomposition(
 
     summary = {
         "target": target,
-        "rows": int(len(signal)),
+        "rows": int(len(price_signal)),
         "test_rows": int(len(actual)),
         "paper_method": "ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN",
         "decomposition_mode": config.decomposition.mode,
         "decomposition_scope": config.decomposition.scope,
+        **_target_transform_summary(config),
         "model_variant": config.model.variant,
         "features": _feature_summary(feature_values, feature_names, config=config),
         "time_scale": config.experiment.time_scale,
@@ -364,7 +454,8 @@ def _run_full_sample_decomposition(
 
 def _run_train_only_recursive_decomposition(
     *,
-    signal: np.ndarray,
+    price_signal: np.ndarray,
+    model_signal: np.ndarray,
     dates: pd.Series,
     target: str,
     stem: str,
@@ -376,12 +467,12 @@ def _run_train_only_recursive_decomposition(
     feature_names: list[str],
 ) -> TargetRunResult:
     fit_end, validation_start, validation_end = fit_validation_test_boundaries(
-        series_length=len(signal),
+        series_length=len(model_signal),
         window_size=config.experiment.window_size,
         split_index=split_index,
         validation_ratio=config.experiment.validation_ratio,
     )
-    fit_signal = signal[:fit_end]
+    fit_signal = model_signal[:fit_end]
     decomposition = decompose_signal(fit_signal, config.decomposition, target=target)
     params_path = _param_cache_path(config, output_dir=output_dir, stem=stem)
     cached_params = _load_cached_params(params_path, config=config)
@@ -393,9 +484,9 @@ def _run_train_only_recursive_decomposition(
     )
 
     validation_steps = validation_end - validation_start
-    forecast_steps = len(signal) - fit_end
+    forecast_steps = len(model_signal) - fit_end
     test_offset = split_index - fit_end
-    target_indices = np.arange(split_index, len(signal), dtype=int)
+    target_indices = np.arange(split_index, len(model_signal), dtype=int)
 
     if not config.model.retrain_model:
         forecasters = _load_forecasters_for_components(
@@ -427,7 +518,7 @@ def _run_train_only_recursive_decomposition(
         }
     else:
         forecasters, selection = _select_forecasters_by_recursive_validation(
-            signal=signal,
+            price_signal=price_signal,
             decomposition=decomposition,
             validation_start=validation_start,
             validation_end=validation_end,
@@ -464,17 +555,30 @@ def _run_train_only_recursive_decomposition(
         for name, values in all_component_predictions.items()
     }
 
-    validation_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
-    validation_actual = signal[validation_start:validation_end]
-    validation_naive = signal[validation_start - 1 : validation_end - 1]
+    validation_model_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
+    validation_indices = np.arange(validation_start, validation_end, dtype=int)
+    validation_predicted = _restore_price_predictions(
+        validation_model_predicted,
+        price_signal=price_signal,
+        target_indices=validation_indices,
+        config=config,
+    )
+    validation_actual = price_signal[validation_start:validation_end]
+    validation_naive = price_signal[validation_start - 1 : validation_end - 1]
     validation_metrics = regression_metrics(validation_actual, validation_predicted)
     if selection.get("source") == "model_checkpoints":
         selection["score"] = validation_metrics.rmse
         selection["validation_metrics"] = validation_metrics.as_dict()
 
-    predicted = np.sum(list(component_predictions.values()), axis=0)
-    actual = signal[target_indices]
-    naive = signal[target_indices - 1]
+    model_predicted = np.sum(list(component_predictions.values()), axis=0)
+    predicted = _restore_price_predictions(
+        model_predicted,
+        price_signal=price_signal,
+        target_indices=target_indices,
+        config=config,
+    )
+    actual = price_signal[target_indices]
+    naive = price_signal[target_indices - 1]
     metrics = regression_metrics(actual, predicted)
     naive_metrics = regression_metrics(actual, naive)
     mdm = {
@@ -493,22 +597,28 @@ def _run_train_only_recursive_decomposition(
             "Error": predicted - actual,
         }
     )
+    predicted_delta = _predicted_delta_column(model_predicted, config=config)
+    if predicted_delta is not None:
+        prediction_frame["PredictedDelta"] = predicted_delta
     validation_path = output_dir / f"validation_predictions_{stem}.csv"
     validation_frame = pd.DataFrame(
         {
             "Date": dates.iloc[validation_start:validation_end].dt.strftime("%Y-%m-%d").to_numpy(),
-            "TargetIndex": np.arange(validation_start, validation_end, dtype=int),
+            "TargetIndex": validation_indices,
             "Actual": validation_actual,
             "Predicted": validation_predicted,
             "NaivePreviousValue": validation_naive,
             "Error": validation_predicted - validation_actual,
         }
     )
+    validation_predicted_delta = _predicted_delta_column(validation_model_predicted, config=config)
+    if validation_predicted_delta is not None:
+        validation_frame["PredictedDelta"] = validation_predicted_delta
     validation_frame.to_csv(validation_path, index=False)
     prediction_frame, conformal_summary = add_aci_intervals(
         prediction_frame,
         target=target,
-        signal=signal,
+        signal=price_signal,
         calibration_frame=validation_frame,
         config=config.conformal,
     )
@@ -554,11 +664,12 @@ def _run_train_only_recursive_decomposition(
     _attach_checkpoint_paths(component_records, checkpoint_paths)
     summary = {
         "target": target,
-        "rows": int(len(signal)),
+        "rows": int(len(price_signal)),
         "test_rows": int(len(actual)),
         "paper_method": "ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN",
         "decomposition_mode": config.decomposition.mode,
         "decomposition_scope": config.decomposition.scope,
+        **_target_transform_summary(config),
         "model_variant": config.model.variant,
         "features": _feature_summary(feature_values, feature_names, config=config),
         "time_scale": config.experiment.time_scale,
@@ -619,7 +730,8 @@ def _run_train_only_recursive_decomposition(
 
 def _run_walk_forward_decomposition(
     *,
-    signal: np.ndarray,
+    price_signal: np.ndarray,
+    model_signal: np.ndarray,
     dates: pd.Series,
     target: str,
     stem: str,
@@ -631,12 +743,12 @@ def _run_walk_forward_decomposition(
     feature_names: list[str],
 ) -> TargetRunResult:
     fit_end, validation_start, validation_end = fit_validation_test_boundaries(
-        series_length=len(signal),
+        series_length=len(model_signal),
         window_size=config.experiment.window_size,
         split_index=split_index,
         validation_ratio=config.experiment.validation_ratio,
     )
-    fit_signal = signal[:fit_end]
+    fit_signal = model_signal[:fit_end]
     fit_decomposition = decompose_signal(fit_signal, config.decomposition, target=target)
     params_path = _param_cache_path(config, output_dir=output_dir, stem=stem)
     cached_params = _load_cached_params(params_path, config=config)
@@ -649,7 +761,7 @@ def _run_walk_forward_decomposition(
     component_names = [component.name for component in fit_decomposition.components]
 
     validation_windows, validation_feature_windows, validation_window_diagnostics = _precompute_walk_forward_windows(
-        signal=signal,
+        signal=model_signal,
         start=validation_start,
         end=validation_end,
         component_names=component_names,
@@ -658,9 +770,9 @@ def _run_walk_forward_decomposition(
         feature_values=feature_values,
     )
     test_windows, test_feature_windows, test_window_diagnostics = _precompute_walk_forward_windows(
-        signal=signal,
+        signal=model_signal,
         start=split_index,
-        end=len(signal),
+        end=len(model_signal),
         component_names=component_names,
         config=config,
         target=target,
@@ -681,8 +793,15 @@ def _run_walk_forward_decomposition(
             device=device,
             feature_windows=validation_feature_windows,
         )
-        validation_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
-        validation_actual = signal[validation_start:validation_end]
+        validation_model_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
+        validation_indices = np.arange(validation_start, validation_end, dtype=int)
+        validation_predicted = _restore_price_predictions(
+            validation_model_predicted,
+            price_signal=price_signal,
+            target_indices=validation_indices,
+            config=config,
+        )
+        validation_actual = price_signal[validation_start:validation_end]
         validation_metrics = regression_metrics(validation_actual, validation_predicted)
         selection = {
             "source": "model_checkpoints",
@@ -707,8 +826,15 @@ def _run_walk_forward_decomposition(
             device=device,
             feature_windows=validation_feature_windows,
         )
-        validation_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
-        validation_actual = signal[validation_start:validation_end]
+        validation_model_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
+        validation_indices = np.arange(validation_start, validation_end, dtype=int)
+        validation_predicted = _restore_price_predictions(
+            validation_model_predicted,
+            price_signal=price_signal,
+            target_indices=validation_indices,
+            config=config,
+        )
+        validation_actual = price_signal[validation_start:validation_end]
         validation_metrics = regression_metrics(validation_actual, validation_predicted)
         selection = {
             "source": "cached_component_params",
@@ -720,7 +846,7 @@ def _run_walk_forward_decomposition(
     else:
         forecasters, selection, validation_component_predictions = (
             _select_forecasters_by_walk_forward_validation(
-                signal=signal,
+                price_signal=price_signal,
                 fit_decomposition=fit_decomposition,
                 validation_start=validation_start,
                 validation_end=validation_end,
@@ -731,8 +857,15 @@ def _run_walk_forward_decomposition(
                 features=feature_values[:fit_end] if feature_values is not None else None,
             )
         )
-        validation_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
-        validation_actual = signal[validation_start:validation_end]
+        validation_model_predicted = np.sum(list(validation_component_predictions.values()), axis=0)
+        validation_indices = np.arange(validation_start, validation_end, dtype=int)
+        validation_predicted = _restore_price_predictions(
+            validation_model_predicted,
+            price_signal=price_signal,
+            target_indices=validation_indices,
+            config=config,
+        )
+        validation_actual = price_signal[validation_start:validation_end]
         validation_metrics = regression_metrics(validation_actual, validation_predicted)
 
     test_component_predictions = _predict_component_windows(
@@ -742,10 +875,16 @@ def _run_walk_forward_decomposition(
         device=device,
         feature_windows=test_feature_windows,
     )
-    predicted = np.sum(list(test_component_predictions.values()), axis=0)
-    target_indices = np.arange(split_index, len(signal), dtype=int)
-    actual = signal[target_indices]
-    naive = signal[target_indices - 1]
+    model_predicted = np.sum(list(test_component_predictions.values()), axis=0)
+    target_indices = np.arange(split_index, len(model_signal), dtype=int)
+    predicted = _restore_price_predictions(
+        model_predicted,
+        price_signal=price_signal,
+        target_indices=target_indices,
+        config=config,
+    )
+    actual = price_signal[target_indices]
+    naive = price_signal[target_indices - 1]
     metrics = regression_metrics(actual, predicted)
     naive_metrics = regression_metrics(actual, naive)
     mdm = {
@@ -764,23 +903,29 @@ def _run_walk_forward_decomposition(
             "Error": predicted - actual,
         }
     )
+    predicted_delta = _predicted_delta_column(model_predicted, config=config)
+    if predicted_delta is not None:
+        prediction_frame["PredictedDelta"] = predicted_delta
     validation_path = output_dir / f"validation_predictions_{stem}.csv"
-    validation_naive = signal[validation_start - 1 : validation_end - 1]
+    validation_naive = price_signal[validation_start - 1 : validation_end - 1]
     validation_frame = pd.DataFrame(
         {
             "Date": dates.iloc[validation_start:validation_end].dt.strftime("%Y-%m-%d").to_numpy(),
-            "TargetIndex": np.arange(validation_start, validation_end, dtype=int),
+            "TargetIndex": validation_indices,
             "Actual": validation_actual,
             "Predicted": validation_predicted,
             "NaivePreviousValue": validation_naive,
             "Error": validation_predicted - validation_actual,
         }
     )
+    validation_predicted_delta = _predicted_delta_column(validation_model_predicted, config=config)
+    if validation_predicted_delta is not None:
+        validation_frame["PredictedDelta"] = validation_predicted_delta
     validation_frame.to_csv(validation_path, index=False)
     prediction_frame, conformal_summary = add_aci_intervals(
         prediction_frame,
         target=target,
-        signal=signal,
+        signal=price_signal,
         calibration_frame=validation_frame,
         config=config.conformal,
     )
@@ -826,11 +971,12 @@ def _run_walk_forward_decomposition(
     _attach_checkpoint_paths(component_records, checkpoint_paths)
     summary = {
         "target": target,
-        "rows": int(len(signal)),
+        "rows": int(len(price_signal)),
         "test_rows": int(len(actual)),
         "paper_method": "ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN",
         "decomposition_mode": config.decomposition.mode,
         "decomposition_scope": config.decomposition.scope,
+        **_target_transform_summary(config),
         "model_variant": config.model.variant,
         "features": _feature_summary(feature_values, feature_names, config=config),
         "time_scale": config.experiment.time_scale,
@@ -918,7 +1064,7 @@ def fit_validation_test_boundaries(
 
 def _select_forecasters_by_recursive_validation(
     *,
-    signal: np.ndarray,
+    price_signal: np.ndarray,
     decomposition: DecompositionResult,
     validation_start: int,
     validation_end: int,
@@ -952,8 +1098,15 @@ def _select_forecasters_by_recursive_validation(
             device=device,
             feature_windows=validation_feature_windows,
         )
-        predicted = np.sum(list(component_predictions.values()), axis=0)
-        actual = signal[validation_start:validation_end]
+        model_predicted = np.sum(list(component_predictions.values()), axis=0)
+        validation_indices = np.arange(validation_start, validation_end, dtype=int)
+        predicted = _restore_price_predictions(
+            model_predicted,
+            price_signal=price_signal,
+            target_indices=validation_indices,
+            config=config,
+        )
+        actual = price_signal[validation_start:validation_end]
         metrics = regression_metrics(actual, predicted)
         score = metrics.rmse
         if score < best_score:
@@ -1130,7 +1283,7 @@ def _extra_component_fold_target(component_names: list[str]) -> str | None:
 
 def _select_forecasters_by_walk_forward_validation(
     *,
-    signal: np.ndarray,
+    price_signal: np.ndarray,
     fit_decomposition: DecompositionResult,
     validation_start: int,
     validation_end: int,
@@ -1141,7 +1294,7 @@ def _select_forecasters_by_walk_forward_validation(
     features: np.ndarray | None = None,
 ) -> tuple[list[ComponentForecaster], dict, dict[str, np.ndarray]]:
     candidates = candidate_params(config)
-    validation_actual = signal[validation_start:validation_end]
+    validation_actual = price_signal[validation_start:validation_end]
     if len(validation_actual) == 0:
         raise ValueError("Validation horizon must contain at least one row.")
 
@@ -1165,7 +1318,14 @@ def _select_forecasters_by_walk_forward_validation(
             device=device,
             feature_windows=validation_feature_windows,
         )
-        predicted = np.sum(list(component_predictions.values()), axis=0)
+        model_predicted = np.sum(list(component_predictions.values()), axis=0)
+        validation_indices = np.arange(validation_start, validation_end, dtype=int)
+        predicted = _restore_price_predictions(
+            model_predicted,
+            price_signal=price_signal,
+            target_indices=validation_indices,
+            config=config,
+        )
         metrics = regression_metrics(validation_actual, predicted)
         score = metrics.rmse
         if score < best_score:
@@ -1380,6 +1540,7 @@ def _checkpoint_summary(config: AppConfig, checkpoint_dir: Path) -> dict:
     return {
         "mode": "train_and_save" if config.model.retrain_model else "load_saved_weights",
         "directory": str(checkpoint_dir),
+        "target_transform": _target_transform(config),
     }
 
 
@@ -1404,6 +1565,7 @@ def _load_cached_params(path: Path, *, config: AppConfig) -> dict[str, dict[str,
         "decomposition_mode": config.decomposition.mode,
         "decomposition_scope": config.decomposition.scope,
         "model_variant": config.model.variant,
+        "target_transform": _target_transform(config),
         "time_scale": config.experiment.time_scale,
         "window_size": config.experiment.window_size,
         "features_enabled": bool(config.features.enabled),
@@ -1469,6 +1631,7 @@ def _save_best_params(
         "decomposition_mode": config.decomposition.mode,
         "decomposition_scope": config.decomposition.scope,
         "model_variant": config.model.variant,
+        "target_transform": _target_transform(config),
         "time_scale": config.experiment.time_scale,
         "window_size": config.experiment.window_size,
         "features_enabled": bool(config.features.enabled),
