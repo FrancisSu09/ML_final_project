@@ -1,0 +1,344 @@
+{
+  "target": "High",
+  "rows": 3000,
+  "test_rows": 600,
+  "paper_method": "ICEEMDAN-PSO-VMD-BiLSTM-SAM-TCN",
+  "decomposition_mode": "iceemdan_pso_vmd",
+  "decomposition_scope": "walk_forward",
+  "target_transform": "delta",
+  "model_training_target": "price_change_component_values",
+  "prediction_reconstruction": "PredictedPrice_t = NaivePreviousValue_t + ModelPredictedDelta_t",
+  "model_variant": "proposed",
+  "features": {
+    "enabled": true,
+    "count": 19,
+    "names": [
+      "CloseReturn",
+      "LogCloseReturn",
+      "HighPrevClosePct",
+      "LowPrevClosePct",
+      "HighLowRangePct",
+      "OpenPrevClosePct",
+      "CloseOpenChangePct",
+      "CloseSMA5Ratio",
+      "ReturnStd5",
+      "CloseSMA10Ratio",
+      "ReturnStd10",
+      "CloseSMA20Ratio",
+      "ReturnStd20",
+      "RSI14",
+      "MACDPct",
+      "MACDSignalPct",
+      "MACDHistPct",
+      "RollingVolatility20",
+      "BollingerBandwidth20"
+    ],
+    "lag_policy": "feature_window_uses_target_index_minus_window_through_target_index_minus_1",
+    "scaler": "per_component_standard_scaler_fit_on_component_fit_rows",
+    "use_for_res": false
+  },
+  "time_scale": 1,
+  "train_split_date": null,
+  "train_split_index": 2400,
+  "fit_end_index": 2161,
+  "validation_start_index": 2161,
+  "validation_end_index": 2400,
+  "validation_rows": 239,
+  "validation_metrics": {
+    "MAPE": 1.1708265522224863,
+    "MAE": 35.4995729977583,
+    "RMSE": 50.00116831312325
+  },
+  "parameter_selection": {
+    "source": "default_params_walk_forward_validation",
+    "metric": "RMSE",
+    "score": 50.00116831312325,
+    "validation_metrics": {
+      "MAPE": 1.1708265522224863,
+      "MAE": 35.4995729977583,
+      "RMSE": 50.00116831312325
+    },
+    "shared_params": {
+      "hidden_size": 64,
+      "epochs": 100,
+      "batch_size": 32,
+      "learning_rate": 0.001
+    },
+    "candidates_evaluated": 1
+  },
+  "walk_forward": {
+    "history_policy": "actual_values_through_previous_day",
+    "validation_window_diagnostics": {
+      "steps": 239,
+      "start_index": 2161,
+      "end_index": 2400,
+      "missing_component_counts": {
+        "VIMF1": 0,
+        "VIMF2": 0,
+        "VIMF3": 0,
+        "IMF2": 0,
+        "IMF3": 0,
+        "IMF4": 0,
+        "IMF5": 0,
+        "IMF6": 0,
+        "IMF7": 0,
+        "IMF8": 0,
+        "IMF9": 5,
+        "Res": 0
+      },
+      "short_component_counts": {
+        "VIMF1": 0,
+        "VIMF2": 0,
+        "VIMF3": 0,
+        "IMF2": 0,
+        "IMF3": 0,
+        "IMF4": 0,
+        "IMF5": 0,
+        "IMF6": 0,
+        "IMF7": 0,
+        "IMF8": 0,
+        "IMF9": 0,
+        "Res": 0
+      },
+      "extra_component_counts": {},
+      "extra_component_policy": "fold_into_Res"
+    },
+    "test_window_diagnostics": {
+      "steps": 600,
+      "start_index": 2400,
+      "end_index": 3000,
+      "missing_component_counts": {
+        "VIMF1": 0,
+        "VIMF2": 0,
+        "VIMF3": 0,
+        "IMF2": 0,
+        "IMF3": 0,
+        "IMF4": 0,
+        "IMF5": 0,
+        "IMF6": 0,
+        "IMF7": 0,
+        "IMF8": 0,
+        "IMF9": 3,
+        "Res": 0
+      },
+      "short_component_counts": {
+        "VIMF1": 0,
+        "VIMF2": 0,
+        "VIMF3": 0,
+        "IMF2": 0,
+        "IMF3": 0,
+        "IMF4": 0,
+        "IMF5": 0,
+        "IMF6": 0,
+        "IMF7": 0,
+        "IMF8": 0,
+        "IMF9": 0,
+        "Res": 0
+      },
+      "extra_component_counts": {},
+      "extra_component_policy": "fold_into_Res"
+    }
+  },
+  "metrics": {
+    "MAPE": 0.7923552830158267,
+    "MAE": 32.54131287354701,
+    "RMSE": 42.64939828401391
+  },
+  "conformal": {
+    "enabled": true,
+    "method": "one-sided ACI with volatility-normalized signed residual scores (upper tail)",
+    "target_coverage": 0.95,
+    "rolling_window": 252,
+    "calibration_window": 63,
+    "min_calibration_points": 30,
+    "gamma": 0.005,
+    "calibration_points": 239,
+    "realized_coverage": 0.9616666666666667,
+    "bound_band_coverage": 0.4216666666666667,
+    "mean_width": 72.77347021588074,
+    "coverage_definition": "realized_coverage is one-sided ACI coverage; bound_band_coverage is P(Actual lies between Predicted and the target bound)",
+    "reference": "Gibbs and Candes (2021), Adaptive Conformal Inference Under Distribution Shift"
+  },
+  "model_checkpoints": {
+    "mode": "train_and_save",
+    "directory": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high",
+    "target_transform": "delta"
+  },
+  "naive_previous_value_metrics": {
+    "MAPE": 0.7102122237011622,
+    "MAE": 29.258649999999992,
+    "RMSE": 39.55109971711701
+  },
+  "mdm_vs_naive": {
+    "mape": {
+      "statistic": 3.6370772976172376,
+      "p_value": 0.000299505852228639,
+      "loss": "mape",
+      "horizon": 1
+    },
+    "mae": {
+      "statistic": 3.550302875070479,
+      "p_value": 0.00041498750983415045,
+      "loss": "mae",
+      "horizon": 1
+    },
+    "rmse": {
+      "statistic": 2.688321917844871,
+      "p_value": 0.007380967654076321,
+      "loss": "rmse",
+      "horizon": 1
+    }
+  },
+  "vmd": {
+    "k": 3,
+    "alpha": 2455.0,
+    "pso_fitness": 0.9657593887820078,
+    "imf1_reconstruction_error": 6.013750240407407e-17
+  },
+  "components": [
+    {
+      "name": "VIMF1",
+      "best_val_loss": 0.0012650806519072936,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 59,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\VIMF1.pt"
+    },
+    {
+      "name": "VIMF2",
+      "best_val_loss": 0.002567497597801564,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 91,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\VIMF2.pt"
+    },
+    {
+      "name": "VIMF3",
+      "best_val_loss": 0.008777553495019675,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 97,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\VIMF3.pt"
+    },
+    {
+      "name": "IMF2",
+      "best_val_loss": 0.007595043177824727,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 42,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF2.pt"
+    },
+    {
+      "name": "IMF3",
+      "best_val_loss": 0.0005721896976167552,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 100,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF3.pt"
+    },
+    {
+      "name": "IMF4",
+      "best_val_loss": 0.0014262415755670085,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 100,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF4.pt"
+    },
+    {
+      "name": "IMF5",
+      "best_val_loss": 0.03279928734829259,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 77,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF5.pt"
+    },
+    {
+      "name": "IMF6",
+      "best_val_loss": 0.004589355120646529,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 73,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF6.pt"
+    },
+    {
+      "name": "IMF7",
+      "best_val_loss": 0.00021332685835997921,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 100,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF7.pt"
+    },
+    {
+      "name": "IMF8",
+      "best_val_loss": 0.00013356161067603416,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 95,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF8.pt"
+    },
+    {
+      "name": "IMF9",
+      "best_val_loss": 0.000840404910593142,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 27,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\IMF9.pt"
+    },
+    {
+      "name": "Res",
+      "best_val_loss": 1.6401711982299213e-06,
+      "params": {
+        "hidden_size": 64,
+        "epochs": 100,
+        "batch_size": 32,
+        "learning_rate": 0.001
+      },
+      "epochs_run": 62,
+      "checkpoint_path": "C:\\Users\\ncuht\\Downloads\\ML_test\\outputs\\sp500\\model_weights_delta\\high\\Res.pt"
+    }
+  ]
+}
