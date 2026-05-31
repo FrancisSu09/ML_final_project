@@ -111,7 +111,6 @@ ML_test/
 │       ├── summary_low.json
 │       ├── fit_high.png
 │       ├── fit_low.png
-│       ├── model_weights_delta/            # delta 模型權重
 │       ├── evaluation_comparisons/          # 三組報告比較圖與表
 │       └── feature_ablation/                # 有無 features 消融圖與表
 └── tests/
